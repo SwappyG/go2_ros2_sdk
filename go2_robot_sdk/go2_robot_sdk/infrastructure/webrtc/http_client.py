@@ -8,7 +8,8 @@ Handles HTTP communication with robot for establishing WebRTC connections.
 
 import logging
 import requests
-from typing import Optional, Dict, Any
+import copy
+from typing import Optional, Dict
 from requests.exceptions import RequestException, HTTPError, ConnectionError, Timeout
 
 
@@ -64,7 +65,7 @@ class HttpClient:
         """
         try:
             # Merge additional headers with session headers
-            request_headers = self.session.headers.copy()
+            request_headers = copy.deepcopy(self.session.headers)
             if headers:
                 request_headers.update(headers)
             
@@ -100,7 +101,7 @@ class HttpClient:
             raise WebRTCHttpError(error_msg)
             
         except HTTPError as e:
-            error_msg = f"HTTP error {response.status_code} when requesting {url}: {e}"
+            error_msg = f"HTTP error when requesting {url}: {e}"
             logger.error(error_msg)
             raise WebRTCHttpError(error_msg)
             

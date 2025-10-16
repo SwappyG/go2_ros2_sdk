@@ -1,15 +1,15 @@
 # Copyright (c) 2024, RoboVerse community
 # SPDX-License-Identifier: BSD-3-Clause
 
+from aiortc import MediaStreamTrack
 import asyncio
 import logging
 import os
 from typing import Dict, Any
 
-from aiortc import MediaStreamTrack
 from cv_bridge import CvBridge
-
 from rclpy.node import Node
+from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy
 from rclpy.qos_overriding_options import QoSOverridingOptions
 from rcl_interfaces.msg import SetParametersResult
@@ -21,10 +21,12 @@ from go2_interfaces.msg import LowState, VoxelMapCompressed, WebRtcReq
 from sensor_msgs.msg import PointCloud2, JointState, Joy, Image, CameraInfo
 from nav_msgs.msg import Odometry
 
-from ..domain.entities import RobotConfig, RobotData, CameraData
-from ..application.services import RobotDataService, RobotControlService
-from ..infrastructure.ros2 import ROS2Publisher
-from ..infrastructure.webrtc import WebRTCAdapter
+from go2_robot_sdk.domain.entities.robot_config import RobotConfig
+from go2_robot_sdk.domain.entities.robot_data import RobotData, CameraData
+from go2_robot_sdk.application.services.robot_data_service import RobotDataService
+from go2_robot_sdk.application.services.robot_control_service import RobotControlService
+from go2_robot_sdk.infrastructure.ros2.ros2_publisher import ROS2Publisher, PublishersDict
+from go2_robot_sdk.infrastructure.webrtc.webrtc_adapter import WebRTCAdapter
 
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)
@@ -60,7 +62,7 @@ class Go2DriverNode(Node):
             config=self.config,
             on_validated_callback=self._on_robot_validated,
             on_video_frame_callback=self._on_video_frame if self.config.enable_video else None,
-            event_loop=self.event_loop
+            event_loop=self.event_loop,
         )
         
         self.robot_control_service = RobotControlService(self.webrtc_adapter)
@@ -118,7 +120,7 @@ class Go2DriverNode(Node):
 
         return config
 
-    def _setup_publishers(self) -> Dict[str, list]:
+    def _setup_publishers(self) -> PublishersDict:
         """ROS2 publishers setup"""
         qos_profile = QoSProfile(depth=10)
         best_effort_qos = QoSProfile(
@@ -127,7 +129,7 @@ class Go2DriverNode(Node):
             depth=1
         )
 
-        publishers = {
+        publishers: PublishersDict = {
             'joint_state': [],
             'robot_state': [],
             'lidar': [],
@@ -279,9 +281,9 @@ class Go2DriverNode(Node):
         """Callback after robot validation"""
         self.get_logger().info(f"Robot {robot_id} validated and ready")
 
-    def _on_robot_data_received(self, msg: Dict[str, Any], robot_id: str) -> None:
+    def _on_robot_data_received(self, robot_data: RobotData) -> None:
         """Callback for receiving data from robot"""
-        self.robot_data_service.process_webrtc_message(msg, robot_id)
+        self.robot_data_service.process_webrtc_message(robot_data)  # type: ignore
 
     async def _on_video_frame(self, track: MediaStreamTrack, robot_id: str) -> None:
         """Callback for processing video frames"""
@@ -290,7 +292,7 @@ class Go2DriverNode(Node):
         while True:
             try:
                 frame = await track.recv()
-                img = frame.to_ndarray(format="bgr24")
+                img = frame.to_ndarray(format="bgr24") # type: ignore
 
                 # Create camera data
                 camera_data = CameraData(
@@ -333,7 +335,7 @@ class Go2DriverNode(Node):
     async def connect_robots(self) -> None:
         """Connect to robots"""
         if self.config.conn_type == 'webrtc':
-            for i, robot_ip in enumerate(self.config.robot_ip_list):
+            for i, _robot_ip in enumerate(self.config.robot_ip_list):
                 try:
                     await self.webrtc_adapter.connect(str(i))
                 except Exception as e:

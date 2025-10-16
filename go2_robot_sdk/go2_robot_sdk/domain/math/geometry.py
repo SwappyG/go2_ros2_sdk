@@ -18,7 +18,7 @@ class Quaternion:
         self.z = z
         self.w = w
 
-    def set_from_axis_angle(self, axis_vector: 'Vector3', angle: float) -> tuple:
+    def set_from_axis_angle(self, axis_vector: 'Vector3', angle: float) -> tuple[float, float, float, float]:
         """Set quaternion from axis-angle representation"""
         half_angle = angle / 2
         sin_half = math.sin(half_angle)
@@ -28,7 +28,7 @@ class Quaternion:
         self.w = math.cos(half_angle)
         return self.x, self.y, self.z, self.w
 
-    def invert(self) -> tuple:
+    def invert(self) -> tuple[float, float, float, float]:
         """Invert the quaternion (conjugate for unit quaternions)"""
         self.x *= -1
         self.y *= -1
@@ -44,7 +44,7 @@ class Vector3:
         self.y = y
         self.z = z
 
-    def add(self, other: 'Vector3') -> tuple:
+    def add(self, other: 'Vector3') -> tuple[float, float, float]:
         """Add another vector to this vector"""
         self.x += other.x
         self.y += other.y
@@ -55,7 +55,7 @@ class Vector3:
         """Create a copy of this vector"""
         return Vector3(self.x, self.y, self.z)
 
-    def apply_quaternion(self, quaternion: Quaternion) -> tuple:
+    def apply_quaternion(self, quaternion: Quaternion) -> tuple[float, float, float]:
         """Apply quaternion rotation to this vector"""
         # Quaternion-vector multiplication
         qx, qy, qz, qw = quaternion.x, quaternion.y, quaternion.z, quaternion.w
@@ -73,7 +73,7 @@ class Vector3:
         
         return self.x, self.y, self.z
 
-    def negate(self) -> tuple:
+    def negate(self) -> tuple[float, float, float]:
         """Negate all components of the vector"""
         self.x = -self.x
         self.y = -self.y
@@ -91,7 +91,7 @@ class Vector3:
         dz = self.z - other.z
         return dx * dx + dy * dy + dz * dz
 
-    def apply_axis_angle(self, axis: 'Vector3', angle: float) -> tuple:
+    def apply_axis_angle(self, axis: 'Vector3', angle: float) -> tuple[float, float, float]:
         """Apply rotation around axis by given angle"""
         quaternion = Quaternion(0, 0, 0, 1)
         quaternion.set_from_axis_angle(axis, angle)

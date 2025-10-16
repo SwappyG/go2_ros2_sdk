@@ -4,7 +4,14 @@
 import sys
 import os
 import logging
-from ament_index_python import get_package_share_directory
+from pathlib import Path
+
+import go2_robot_sdk
+
+try:
+    from ament_index_python import get_package_share_directory  # pyright: ignore[reportMissingImports]
+except ImportError:
+    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent)
 
 logger = logging.getLogger(__name__)
 

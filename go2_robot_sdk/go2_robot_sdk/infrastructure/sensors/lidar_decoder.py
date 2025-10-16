@@ -8,21 +8,27 @@ Handles decoding of compressed voxel map data from WebRTC stream.
 
 import ctypes
 import numpy as np
-import os
+import numpy.typing as npt
 import math
-from typing import Dict, Any
+from typing import cast
+from pathlib import Path
+import go2_robot_sdk
+from wasmtime import Config, Engine, Store, Module, Instance, Func, FuncType, ValType, Memory
+from go2_robot_sdk.infrastructure.sensors.lidar_decoder_result import DecodeResult
 
-from wasmtime import Config, Engine, Store, Module, Instance, Func, FuncType, ValType
-from ament_index_python import get_package_share_directory
+try:
+    from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
+except ImportError:
+    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent.parent)
 
 
 def update_meshes_for_cloud2(
-    positions: list, 
-    uvs: list, 
+    positions: npt.NDArray[np.uint8], 
+    uvs: npt.NDArray[np.uint8], 
     res: float, 
-    origin: list, 
+    origin: tuple[float, float, float], 
     intense_limiter: float
-) -> np.ndarray:
+) -> npt.NDArray[np.float32]:
     """
     Process LiDAR point cloud data for ROS2 PointCloud2 message.
     
@@ -74,11 +80,7 @@ class LidarDecoder:
         config.debug_info = True
         self.store = Store(Engine(config))
 
-        libvoxel_path = os.path.join(
-            get_package_share_directory('go2_robot_sdk'),
-            "external_lib",
-            'libvoxel.wasm')
-
+        libvoxel_path = Path(get_package_share_directory('go2_robot_sdk')) / "external_lib" / "libvoxel.wasm"
         self.module = Module.from_file(self.store.engine, libvoxel_path)
 
         self.a_callback_type = FuncType([ValType.i32()], [ValType.i32()])
@@ -89,11 +91,10 @@ class LidarDecoder:
 
         self.instance = Instance(self.store, self.module, [a, b])
 
-        self.generate = self.instance.exports(self.store)["e"]
-        self.malloc = self.instance.exports(self.store)["f"]
-        self.free = self.instance.exports(self.store)["g"]
-        self.wasm_memory = self.instance.exports(self.store)["c"]
-
+        self.generate = cast(Func, self.instance.exports(self.store)["e"])
+        self.malloc = cast(Func, self.instance.exports(self.store)["f"])
+        self.free = cast(Func, self.instance.exports(self.store)["g"])
+        self.wasm_memory = cast(Memory, self.instance.exports(self.store)["c"])
         self.buffer = self.wasm_memory.data_ptr(self.store)
         self.memory_size = self.wasm_memory.data_len(self.store)
 
@@ -155,7 +156,7 @@ class LidarDecoder:
         else:
             raise ValueError("Not enough space to insert bytes at the specified index.")
 
-    def decode(self, compressed_data, data):
+    def decode(self, compressed_data, data) -> DecodeResult:
         """Original decode method that actually works with the WASM module"""
         self.add_value_arr(self.input, compressed_data)
 
@@ -214,9 +215,9 @@ def get_voxel_decoder() -> LidarDecoder:
 def decode_lidar_data(
     compressed_data: bytes,
     resolution: float = 0.01,
-    origin: list = [0.0, 0.0, 0.0],
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
     intensity_threshold: float = 0.1
-) -> np.ndarray:
+) -> npt.NDArray[np.float32]:
     """
     High-level function to decode LiDAR data.
     
@@ -237,10 +238,6 @@ def decode_lidar_data(
     
     result = decoder.decode(compressed_data, metadata)
     
-    # Convert to expected format
-    positions = result["positions"]
-    uvs = result["uvs"]
-    
     return update_meshes_for_cloud2(
-        positions, uvs, resolution, origin, intensity_threshold
+        result["positions"], result["uvs"], resolution, origin, intensity_threshold
     ) 

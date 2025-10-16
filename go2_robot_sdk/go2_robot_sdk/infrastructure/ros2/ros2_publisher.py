@@ -5,6 +5,7 @@
 import logging
 
 from rclpy.node import Node
+from rclpy.publisher import Publisher
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 from go2_interfaces.msg import Go2State, IMU
@@ -14,19 +15,32 @@ from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
+from sensor_msgs.msg import CameraInfo
+from typing import TypedDict
 
-from ...domain.interfaces import IRobotDataPublisher
-from ...domain.entities import RobotData, RobotConfig
-from ..sensors.lidar_decoder import update_meshes_for_cloud2
-from ..sensors.camera_config import load_camera_info
+from go2_robot_sdk.domain.interfaces.robot_data_publisher import IRobotDataPublisher
+from go2_robot_sdk.domain.entities.robot_data import RobotData
+from go2_robot_sdk.domain.entities.robot_config import RobotConfig
+from go2_robot_sdk.infrastructure.sensors.lidar_decoder import update_meshes_for_cloud2
+from go2_robot_sdk.infrastructure.sensors.camera_config import load_camera_info
 
 logger = logging.getLogger(__name__)
+
+class PublishersDict(TypedDict):
+    joint_state: list[Publisher]
+    robot_state: list[Publisher]
+    lidar: list[Publisher]
+    odometry: list[Publisher]
+    imu: list[Publisher]
+    camera: list[Publisher]
+    camera_info: list[Publisher]
+    voxel: list[Publisher]
 
 
 class ROS2Publisher(IRobotDataPublisher):
     """ROS2 adapter for publishing robot data"""
 
-    def __init__(self, node: Node, config: RobotConfig, publishers: dict, broadcaster: TransformBroadcaster):
+    def __init__(self, node: Node, config: RobotConfig, publishers: PublishersDict, broadcaster: TransformBroadcaster):
         self.node = node
         self.config = config
         self.publishers = publishers
@@ -62,6 +76,10 @@ class ROS2Publisher(IRobotDataPublisher):
         else:
             odom_trans.child_frame_id = f"robot{robot_data.robot_id}/base_link"
 
+        if robot_data.odometry_data is None:
+            logger.warning("can't publish transform without odometry data")
+            return
+        
         position = robot_data.odometry_data.position
         orientation = robot_data.odometry_data.orientation
 
@@ -87,6 +105,10 @@ class ROS2Publisher(IRobotDataPublisher):
         else:
             odom_msg.child_frame_id = f"robot{robot_data.robot_id}/base_link"
 
+        if robot_data.odometry_data is None:
+            logger.warning("publish odometry called, but robot data didn't contain odometry data")
+            return
+        
         position = robot_data.odometry_data.position
         orientation = robot_data.odometry_data.orientation
 
@@ -187,12 +209,15 @@ class ROS2Publisher(IRobotDataPublisher):
         try:
             robot_idx = int(robot_data.robot_id)
             lidar = robot_data.lidar_data
-
+            if len(lidar.origin) != 3:
+                logger.warning(f"invalid origin list size in lidar data. {lidar.origin=}")
+                return
+            
             points = update_meshes_for_cloud2(
                 lidar.positions,
                 lidar.uvs,
                 lidar.resolution,
-                lidar.origin,
+                (lidar.origin[0], lidar.origin[1], lidar.origin[2]),
                 0
             )
 
@@ -227,8 +252,17 @@ class ROS2Publisher(IRobotDataPublisher):
             ros_image.header.stamp = self.node.get_clock().now().to_msg()
 
             # Camera info
-            camera_info = self.camera_info[camera.height]
+            go2_camera_info = self.camera_info[camera.height]
+            camera_info = CameraInfo()
             camera_info.header.stamp = ros_image.header.stamp
+
+            camera_info.width = go2_camera_info.image_width
+            camera_info.height = go2_camera_info.image_height
+            camera_info.k = go2_camera_info.camera_matrix.data
+            camera_info.d = go2_camera_info.distortion_coefficients.data
+            camera_info.r = go2_camera_info.rectification_matrix.data
+            camera_info.p = go2_camera_info.projection_matrix.data
+            camera_info.distortion_model = go2_camera_info.distortion_model
 
             if self.config.conn_mode == 'single':
                 camera_info.header.frame_id = 'front_camera'

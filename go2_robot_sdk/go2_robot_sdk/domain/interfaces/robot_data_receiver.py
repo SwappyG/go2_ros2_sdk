@@ -3,8 +3,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Callable
-from ..entities.robot_data import RobotData
-
+from go2_robot_sdk.domain.entities.robot_data import RobotData
 
 class IRobotDataReceiver(ABC):
     """Interface for receiving data from robot via WebRTC"""

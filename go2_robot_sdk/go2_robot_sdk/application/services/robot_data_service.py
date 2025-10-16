@@ -5,9 +5,9 @@ import logging
 import math
 from typing import Dict, Any
 
-from ...domain.entities import RobotData, RobotState, IMUData, OdometryData, JointData, LidarData
-from ...domain.interfaces import IRobotDataPublisher
-from ...domain.constants import RTC_TOPIC
+from go2_robot_sdk.domain.entities.robot_data import RobotData, RobotState, IMUData, OdometryData, JointData, LidarData
+from go2_robot_sdk.domain.interfaces.robot_data_publisher import IRobotDataPublisher
+from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ class RobotDataService:
                 resolution=data.get("resolution", 0.0),
                 origin=data.get("origin", [0.0, 0.0, 0.0]),
                 stamp=data.get("stamp", 0.0),
-                width=data.get("width"),
-                src_size=data.get("src_size"),
+                width=data.get("width", []),
+                src_size=data.get("src_size", 0.0),
                 compressed_data=msg.get("compressed_data")
             )
         except Exception as e:
@@ -143,7 +143,7 @@ class RobotDataService:
         except Exception as e:
             logger.error(f"Error processing low state: {e}")
 
-    def _validate_float_list(self, data: list) -> bool:
+    def _validate_float_list(self, data: list[Any]) -> bool:
         """Validate a list of float values"""
         return all(isinstance(x, (int, float)) and math.isfinite(x) for x in data)
 

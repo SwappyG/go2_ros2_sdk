@@ -72,10 +72,3 @@ AUDIO_HUB_COMMANDS = {
     "SET_VOLUME": 4004,
     "GET_AUDIO_STATUS": 4005,
 }
-
-# Export all constants
-__all__ = [
-    'RTC_TOPIC',
-    'DATA_CHANNEL_TYPE',
-    'AUDIO_HUB_COMMANDS',
-] 
