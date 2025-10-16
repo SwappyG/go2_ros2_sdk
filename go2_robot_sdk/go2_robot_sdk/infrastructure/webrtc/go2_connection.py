@@ -13,7 +13,7 @@ import json
 import logging
 import base64
 from typing import Callable, Any, Coroutine, TypeAlias
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack  # type: ignore
 
 from go2_robot_sdk.infrastructure.webrtc.crypto.encryption import CryptoUtils, ValidationCrypto, PathCalculator, EncryptionError
 from go2_robot_sdk.infrastructure.webrtc.http_client import HttpClient, WebRTCHttpError
@@ -80,13 +80,14 @@ class Go2Connection:
         self.data_decoder = WebRTCDataDecoder(enable_lidar_decoding=decode_lidar)
         
         # Setup data channel
-        self.data_channel = self.pc.createDataChannel("data") # id=0
+        self.data_channel = self.pc.createDataChannel("data", id=0)
         self.data_channel.on("open", self.on_data_channel_open)
         self.data_channel.on("message", self.on_data_channel_message)
         
         # Setup peer connection events
         self.pc.on("track", self.on_track)
         self.pc.on("connectionstatechange", self.on_connection_state_change)
+        
         
         # Add video transceiver if video callback provided
         if self.on_video_frame:
@@ -117,7 +118,7 @@ class Go2Connection:
             if self.data_channel.readyState != "open":
                 self.data_channel._setReadyState("open") # pyright: ignore[reportPrivateUsage]
 
-            logger.debug(f"Received message: {message}")
+            logger.debug(f"Received message: {message=}. {self.data_channel.readyState=}")
 
             # if we're not validated, we have to parse every message we get to see if there's
             # a validation message
@@ -218,14 +219,17 @@ class Go2Connection:
             msg_type: Message type
         """
         try:
+            if self.data_channel.readyState != "open":
+                logger.info("not ready, not sending")
+                return
             payload = {
                 "type": msg_type,
                 "topic": topic,
                 "data": data
             }
-            print(payload)
+            logging.info(f"{payload=}")
             payload_str = json.dumps(payload)
-            print(f"-> Sending message {payload_str}")
+            logging.info(f"-> Sending message {payload_str}")
             self.data_channel.send(payload_str)
             
         except Exception as e:
@@ -237,7 +241,7 @@ class Go2Connection:
                 logger.warning(f"Data channel is not open. State is {self.data_channel.readyState}")
                 return
             
-            print(f"-> Sending message {json_str}")
+            logging.info(f"-> Sending raw json message {json_str=}")
             self.data_channel.send(json_str)
             
         except Exception as e:

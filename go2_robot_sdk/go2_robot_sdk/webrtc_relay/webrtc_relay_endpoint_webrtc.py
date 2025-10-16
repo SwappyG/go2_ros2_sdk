@@ -1,4 +1,4 @@
-from aiortc import RTCPeerConnection, RTCDataChannel, RTCConfiguration, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCDataChannel, RTCConfiguration, RTCSessionDescription  # type: ignore
 from fastapi import Depends, APIRouter
 import logging
 from pydantic import BaseModel
@@ -76,7 +76,9 @@ async def offer(
         answer = await new_relay_peer_connection.createAnswer()
         
         logger.info(f"relay RTC setting local description")
-        await new_relay_peer_connection.setLocalDescription(answer)
+
+        # NOTE: in the newer aiortc versions, answer is always a type. But here in 1.9, it can be None
+        await new_relay_peer_connection.setLocalDescription(answer)  # type: ignore
 
         # Re-trigger video to push fresh SPS/PPS for new subscriber
         try:

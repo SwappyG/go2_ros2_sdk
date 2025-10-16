@@ -1,5 +1,5 @@
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack  # type: ignore
 from aiortc.contrib.media import MediaBlackhole
 import asyncio
 import base64
@@ -350,7 +350,7 @@ class MockGo2EncryptedServer:
         await pc.setRemoteDescription(RTCSessionDescription(sdp=remote_sdp, type=remote_type))
         answer = await pc.createAnswer()
         
-        await pc.setLocalDescription(answer)
+        await pc.setLocalDescription(answer)  # type: ignore
 
         answer_json = json.dumps({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
         # 4) AES-encrypt answer and return as plain text

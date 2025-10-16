@@ -1,13 +1,14 @@
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel
+# NOTE: not sure why im getting import warnings, this is working. 
+# We're pinned to a very specific version of aiortc, 1.9. 1.11 doesn't work. 
+# 1.13 or higher has conflicts with v0.9 of forked aioice. This should be resolved at some point 
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel  # type: ignore
 import asyncio
 import contextlib
 import httpx
-# import json
 import logging
 import argparse
 import typing as t
 
-# from pprint import pformat
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import ConnectArgs
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import OfferArgs, OfferReply
@@ -267,17 +268,6 @@ class WebRTCRelayClient:
         await done
 
 
-    
-
-    
-
-
-
-
-
-
-
-
 async def main(
     relay_url: str, 
     config: RobotConfig,
@@ -349,7 +339,7 @@ if __name__ == "__main__":
 
             # New robot data hook
             async def on_robot_data(robot_data):
-                # logger.info("on robot data")
+                # logger.debug("on robot data")
                 try:
                     if robot_data and robot_data.odometry_data:
                         odom = robot_data.odometry_data
@@ -366,60 +356,4 @@ if __name__ == "__main__":
     finally:
         if display_task is not None:
             display_task.cancel()
-            asyncio.wait_for(display_task)
-
-
-
-
-        # Sanity check: positions length should be face_count*12; thus N_points = face_count*4
-        # assert len(dec["positions"]) % 12 == 0
-        # expected_face_count = len(dec["positions"]) // 12
-        # logger.info("faces (from positions):", expected_face_count, "reported:", dec["face_count"])
-
-        # Visualize (pick one)
-        # lpcv.plot_points_matplotlib(points_world)          # quick scatter
-        # lpcv.show_mesh_open3d(points_world, dec["face_count"])  # full mesh (if you want a surface)
-
-    # args.api.rstrip("/")
-
-
-    # try:
-    #     if self._video_task:
-    #         await self._video_task
-    #     else:
-    #         # No video track provided; idle until interrupted
-    #         while True:
-    #             await asyncio.sleep(5)
-    # except KeyboardInterrupt:
-    #     pass
-    # finally:
-    #     if video_task:
-    #         video_task.cancel()
-    #         with contextlib.suppress(Exception):
-    #             await video_task
-    #     await peer_connection.close()
-    #     if viewer:
-    #         await asyncio.to_thread(viewer.close)
-
-    # if args.robot_ip and args.disconnect_on_exit:
-    #     try:
-    #         r = await client.post(f"{base}/disconnect")
-    #         r.raise_for_status()
-    #         logger.info("[client] /disconnect:", r.json())
-    #     except Exception as e:
-    #         logger.info("[client] /disconnect failed:", e)
-
-
-
-                            # logger.debug(pformat({
-                #     'face_count':  decoded['decoded_data']['face_count'],
-                #     'point_count':  decoded['decoded_data']['point_count'],
-                #     'num_ind': len(decoded['decoded_data']['indices']),
-                #     'num_pos': len(decoded['decoded_data']['positions']),
-                #     'num_uvs': len(decoded['decoded_data']['uvs'])
-                # }))
-                # logger.debug(pformat({
-                #     'indices': decoded['decoded_data']['indices'][:24],
-                #     'positions': decoded['decoded_data']['positions'][:24],
-                #     'uvs': decoded['decoded_data']['uvs'][:24]
-                # }))
+            asyncio.wait_for(display_task, timeout=None)

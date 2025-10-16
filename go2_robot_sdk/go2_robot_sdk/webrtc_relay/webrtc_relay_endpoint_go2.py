@@ -1,5 +1,5 @@
 
-from aiortc import MediaStreamTrack
+from aiortc import MediaStreamTrack # type: ignore
 import asyncio
 from fastapi import HTTPException, Depends, APIRouter
 import json

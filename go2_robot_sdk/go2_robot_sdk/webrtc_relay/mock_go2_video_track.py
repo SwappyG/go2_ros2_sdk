@@ -1,4 +1,4 @@
-from aiortc import MediaStreamTrack
+from aiortc import MediaStreamTrack  # type: ignore
 import asyncio
 from av import VideoFrame  # pyright: ignore[reportPrivateImportUsage]
 from fractions import Fraction

@@ -1,6 +1,6 @@
 import asyncio
 import cv2
-from aiortc import MediaStreamTrack
+from aiortc import MediaStreamTrack  # type: ignore
 import logging
 
 logger = logging.getLogger(__name__)
