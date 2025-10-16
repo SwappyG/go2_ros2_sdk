@@ -12,7 +12,6 @@ import binascii
 import uuid
 import base64
 import hashlib
-from typing import Optional
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_v1_5
 

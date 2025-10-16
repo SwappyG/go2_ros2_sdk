@@ -9,7 +9,7 @@ Contains functions to create properly formatted WebRTC commands.
 import datetime
 import json
 import random
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 # Topic constants for different command types
 SPORT_MODE_TOPIC = "rt/api/sport/request"
@@ -25,10 +25,10 @@ def generate_id() -> int:
 
 def create_command_structure(
         api_id: int, 
-        parameter: Union[str, Dict], 
+        parameter: Union[str, dict[str, Any]], 
         topic: str = SPORT_MODE_TOPIC,
         command_id: Optional[int] = None
-) -> Dict:
+) -> dict[str, Any]:
     """
     Create a standardized command structure for WebRTC communication.
     
@@ -63,7 +63,7 @@ def create_command_structure(
 
 def gen_command(
         cmd: int,
-        parameters: Optional[Union[str, Dict]] = None,
+        parameters: Optional[Union[str, dict[str, Any]]] = None,
         topic: Optional[str] = None,
         command_id: Optional[int] = None
 ) -> str:

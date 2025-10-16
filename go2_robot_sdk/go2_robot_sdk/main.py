@@ -11,7 +11,7 @@ import threading
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 
-from .presentation.go2_driver_node import Go2DriverNode
+from go2_robot_sdk.presentation.go2_driver_node import Go2DriverNode
 
 
 async def run_robot_connections(node: Go2DriverNode):

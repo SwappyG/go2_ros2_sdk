@@ -9,16 +9,16 @@ Handles decoding of compressed LiDAR data and other binary messages from WebRTC.
 import json
 import struct
 import logging
-from typing import Optional, Dict, Any, Union
+from typing import Optional, TypedDict, Any  # pyright: ignore[reportUnusedImport]
+from go2_robot_sdk.infrastructure.sensors.lidar_decoder_result import DecodeResult
 try:
     # Use the working LidarDecoder from infrastructure
-    from ..sensors.lidar_decoder import LidarDecoder as OriginalLidarDecoder
+    from go2_robot_sdk.infrastructure.sensors.lidar_decoder import LidarDecoder as OriginalLidarDecoder
 except ImportError:
     OriginalLidarDecoder = None
 
 
 logger = logging.getLogger(__name__)
-
 
 class DataDecodingError(Exception):
     """Custom exception for data decoding errors"""
@@ -49,7 +49,7 @@ class WebRTCDataDecoder:
                 logger.warning(f"Failed to initialize LiDAR decoder: {e}")
                 self.enable_lidar_decoding = False
     
-    def decode_array_buffer(self, buffer: bytes) -> Optional[Dict[str, Any]]:
+    def decode_array_buffer(self, buffer: bytes) -> dict[str, Any] | None:
         """
         Decode binary array buffer from WebRTC data channel.
         
@@ -64,11 +64,7 @@ class WebRTCDataDecoder:
             
         Returns:
             Dictionary containing decoded data or None if decoding fails
-        """
-        if not isinstance(buffer, bytes):
-            logger.error("Buffer must be bytes type")
-            return None
-        
+        """        
         if len(buffer) < 4:
             logger.error("Buffer too short, minimum 4 bytes required")
             return None
@@ -78,7 +74,7 @@ class WebRTCDataDecoder:
             json_length = struct.unpack("<H", buffer[:2])[0]
             
             logger.debug(f"JSON segment length: {json_length}")
-            
+                        
             # Validate buffer length
             if len(buffer) < 4 + json_length:
                 logger.error(f"Buffer too short for JSON segment. Expected {4 + json_length}, got {len(buffer)}")
@@ -86,6 +82,7 @@ class WebRTCDataDecoder:
             
             # Extract JSON segment (skip 2 bytes header + 2 bytes padding)
             json_segment = buffer[4:4 + json_length]
+
             
             # Extract compressed data (remaining bytes)
             compressed_data = buffer[4 + json_length:]
@@ -93,38 +90,41 @@ class WebRTCDataDecoder:
             # Decode JSON metadata
             try:
                 json_str = json_segment.decode("utf-8")
-                metadata = json.loads(json_str)
-            except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to decode JSON segment: {e}")
+                metadata: dict[str, Any] = json.loads(json_str)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exception:
+                logger.error(f"Failed to decode JSON segment: {exception=}")
                 return None
-            
-            logger.debug(f"Decoded metadata: {metadata}")
-            
-            # Add compressed data to result
-            result = metadata.copy()
-            
+
             # Decode LiDAR data if enabled and decoder is available
             if self.enable_lidar_decoding and self._lidar_decoder and compressed_data:
                 try:
                     decoded_data = self._decode_lidar_data(compressed_data, metadata)
-                    result["decoded_data"] = decoded_data
                     logger.debug("Successfully decoded LiDAR data")
-                except Exception as e:
-                    logger.warning(f"Failed to decode LiDAR data: {e}")
-                    result["compressed_data"] = compressed_data
-            else:
-                result["compressed_data"] = compressed_data
+                    return {
+                        'decoded_data': decoded_data,
+                        'compressed_data': compressed_data,
+                        'data': metadata,
+                        **metadata
+                    }
+                except Exception as exception:
+                    logger.warning(f"Failed to decode LiDAR data: {exception=}")
+                    pass
+                    
+            return {
+                'decoded_data': None,
+                'compressed_data': compressed_data,
+                'data': metadata,
+                **metadata
+            }
             
-            return result
-            
-        except struct.error as e:
-            logger.error(f"Failed to unpack buffer header: {e}")
+        except struct.error as exception:
+            logger.error(f"Failed to unpack buffer header: {exception}")
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error decoding array buffer: {e}")
+        except Exception as exception:
+            logger.error(f"Unexpected error decoding array buffer: {exception}")
             return None
     
-    def _decode_lidar_data(self, compressed_data: bytes, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def _decode_lidar_data(self, compressed_data: bytes, metadata: dict[str, Any]) -> DecodeResult:
         """
         Decode compressed LiDAR data using WASM decoder.
         
@@ -146,6 +146,8 @@ class WebRTCDataDecoder:
         
         try:
             # Use the original LidarDecoder interface
+            if 'data' in metadata:
+                metadata = metadata['data']
             decoded_result = self._lidar_decoder.decode(compressed_data, metadata)
             
             return decoded_result
@@ -203,7 +205,7 @@ except:
 
 
 # Backward compatibility function
-def deal_array_buffer(buffer: bytes, perform_decode: bool = True) -> Optional[Dict[str, Any]]:
+def deal_array_buffer(buffer: bytes, perform_decode: bool = True) -> dict[str, Any] | None:
     """
     Legacy function for backward compatibility.
     
@@ -214,9 +216,6 @@ def deal_array_buffer(buffer: bytes, perform_decode: bool = True) -> Optional[Di
     Returns:
         Decoded data dictionary or None
     """
-    if not isinstance(buffer, bytes):
-        return None
-    
     try:
         # Use original implementation for full compatibility
         if _global_lidar_decoder and perform_decode:

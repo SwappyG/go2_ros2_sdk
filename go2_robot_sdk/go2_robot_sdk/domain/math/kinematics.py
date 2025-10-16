@@ -8,7 +8,7 @@ Contains inverse kinematics for leg joint calculations.
 
 import math
 import numpy as np
-from .geometry import Vector3
+from go2_robot_sdk.domain.math.geometry import Vector3
 
 # URDF Go2 real physical dimensions (in meters)
 HIP_LENGTH = 0.0955
@@ -16,7 +16,7 @@ THIGH_LENGTH = 0.213
 CALF_LENGTH = 0.2135
 
 
-def get_robot_joints(foot_position_value: list, foot_num: int) -> tuple:
+def get_robot_joints(foot_position_value: list[float], foot_num: int) -> tuple[float, float, float]:
     """
     Calculate joint angles for a leg given foot position.
     
