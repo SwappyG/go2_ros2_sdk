@@ -7,10 +7,10 @@ from typing import Dict, Any
 
 from go2_robot_sdk.domain.entities.robot_data import RobotData, RobotState, IMUData, OdometryData, JointData, LidarData
 from go2_robot_sdk.domain.interfaces.robot_data_publisher import IRobotDataPublisher
-from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 
 logger = logging.getLogger(__name__)
 
+# NOTE: parsing has been moved to its own file, so this is just publishing now
 
 class RobotDataService:
     """Service for processing and validating robot data"""
