@@ -20,11 +20,14 @@ libs_path = os.path.join(
     'external_lib'
 )
 
-if os.path.exists(os.path.join(libs_path, 'aioice', '__init__.py')):
-    sys.path.insert(0, os.path.join(libs_path, 'aioice'))
-    sys.path.insert(0, os.path.join(libs_path))
+try:
+    import aioice  # pyright: ignore[reportUnusedImport]
+except ImportError:
+    if os.path.exists(os.path.join(libs_path, 'aioice', '__init__.py')):
+        sys.path.insert(0, os.path.join(libs_path, 'aioice'))
+        sys.path.insert(0, os.path.join(libs_path))
 
-    logger.info('Patched aioice added to sys.path: {}'.format(sys.path))
-else:
-    logger.error("aioice submodule is not initalized. please init submodules recursively")
-    exit(-1)
+        logger.info('Patched aioice added to sys.path: {}'.format(sys.path))
+    else:
+        logger.error("aioice submodule is not initalized. please init submodules recursively")
+        exit(-1)
