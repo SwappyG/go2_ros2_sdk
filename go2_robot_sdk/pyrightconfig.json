@@ -1,0 +1,17 @@
+{
+  "exclude": [
+    "**/venv",
+    "**/__pycache__",
+  ],
+  "typeCheckingMode": "strict",
+  "useLibraryCodeForTypes": true,
+
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnknownArgumentType": false,
+  "reportMissingParameterType": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownLambdaType": false,
+  "reportUnknownMemberType": false,
+}

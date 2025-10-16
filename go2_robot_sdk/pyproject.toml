@@ -1,0 +1,15 @@
+[project]
+name = "go2-robot-sdk"
+version = "0.1.0"
+description = "establish connection to unitree go2 and expose data over webrtc and http"
+authors = []
+license = {text = "BSD-3-Clause"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aioice=^0.10",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
