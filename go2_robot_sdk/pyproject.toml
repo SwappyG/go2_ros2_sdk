@@ -7,21 +7,24 @@ license = {text = "BSD-3-Clause"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "aioice >= 0.10, < 1",
+    "aioice @ git+https://github.com/legion1581/aioice.git@go2",
     "numpy >=1.26, < 2",
     "pydantic >=2.12, < 3",
     "PyYAML >=6.0, < 7",
     "wasmtime >=37, < 38",
     "pycryptodome >=3.23, < 4",
-    "aiortc >= 1.14, < 2",
+    "aiortc == 1.9",
     "requests >= 2.32, < 3",
-    "av >= 16.0, < 17",
+    "av < 17",
     "aiohttp >= 3.13, <= 4",
     "open3d >= 0.19, < 1",
     "fastapi[standard] >= 0.119, < 1",
     "opencv-python >=4.11, < 5",
     "httpx >= 0.28, < 1",
 ]   
+
+# [tool.poetry.dependencies]
+# aioice = { source = "../my_local_package", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
