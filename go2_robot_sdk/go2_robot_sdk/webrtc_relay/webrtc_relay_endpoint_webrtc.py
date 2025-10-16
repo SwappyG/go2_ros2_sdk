@@ -74,9 +74,6 @@ async def offer(
         await new_relay_peer_connection.setRemoteDescription(RTCSessionDescription(sdp=sdp.sdp, type=sdp.type))
         logger.info(f"relay RTC creating answer")
         answer = await new_relay_peer_connection.createAnswer()
-        if answer is None:
-            logger.warning(f"failed to create rtc answer")
-            raise StateException("failed to create rtc answer")
         
         logger.info(f"relay RTC setting local description")
         await new_relay_peer_connection.setLocalDescription(answer)

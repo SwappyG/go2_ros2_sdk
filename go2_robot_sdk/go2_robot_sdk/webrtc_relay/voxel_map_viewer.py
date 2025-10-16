@@ -26,7 +26,7 @@ def _positions_u8_to_world_points(
     origin = np.asarray(origin_xyz, dtype=np.float32)[None, :]
     return pts + origin
 
-def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
+def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> npt.NDArray[np.float64]:
     x, y, z, w = qx, qy, qz, qw
     xx, yy, zz = x*x, y*y, z*z
     xy, xz, yz = x*y, x*z, y*z
@@ -55,11 +55,11 @@ class VoxelMapViewer:
         self.axis_order = axis_order
 
         # frame queue: (positions_u8, face_count, resolution, origin)
-        self._q: "queue.Queue[tuple[np.ndarray,int,float,tuple[float,float,float]]]" = queue.Queue(maxsize=1)
+        self._q: queue.Queue[tuple[npt.NDArray[np.uint8],int,float,tuple[float,float,float]]] = queue.Queue(maxsize=1)
 
         # pose (shared state)
         self._pose_lock = threading.Lock()
-        self._pose_latest: tuple[np.ndarray, np.ndarray] | None = None  # (t: [3], q: [4])
+        self._pose_latest: tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]] | None = None  # (t: [3], q: [4])
 
         self._stop = threading.Event()
         self._thr = threading.Thread(target=self._run, name="Open3DViewer", daemon=True)
@@ -84,7 +84,7 @@ class VoxelMapViewer:
         positions_u8: npt.NDArray[np.uint8],
         face_count: int,
         resolution: float,
-        origin_xyz: t.Sequence[float],
+        origin_xyz: tuple[float, float, float],
     ):
         # drop stale frame if queue is full
         try:
@@ -93,7 +93,7 @@ class VoxelMapViewer:
         except queue.Empty:
             pass
         arr = np.array(positions_u8, dtype=np.uint8, copy=True)
-        self._q.put((arr, int(face_count), float(resolution), tuple(origin_xyz)))
+        self._q.put((arr, int(face_count), float(resolution), origin_xyz))
 
     def submit_robot_pose(
         self,
@@ -108,7 +108,7 @@ class VoxelMapViewer:
     # ---- thread (Open3D) ----
 
     def _run(self):
-        vis = o3d.visualization.Visualizer()
+        vis = o3d.visualization.Visualizer()  # pyright: ignore[reportAttributeAccessIssue]
         vis.create_window(window_name=self.window_name)
         opt = vis.get_render_option()
         opt.light_on = True
@@ -156,13 +156,14 @@ class VoxelMapViewer:
                     pass
 
                 if got_frame:
-                    pts = _positions_u8_to_world_points(positions_u8, resolution, origin, self.axis_order)
+                    # NOTE: cleanup the control flow here, the implicit invariants are messing with the linter
+                    pts = _positions_u8_to_world_points(positions_u8, resolution, origin, self.axis_order) # type: ignore
 
                     # Update triangles only when face_count changes
-                    if face_count > 0 and last_face_count != face_count:
-                        tris_np = _triangles_from_faces(face_count, self.flip_winding)
+                    if face_count > 0 and last_face_count != face_count: # type: ignore
+                        tris_np = _triangles_from_faces(face_count, self.flip_winding) # type: ignore
                         lidar_mesh.triangles = o3d.utility.Vector3iVector(tris_np)  # independent buffer
-                        last_face_count = face_count
+                        last_face_count = face_count # type: ignore
 
                     lidar_mesh.vertices = o3d.utility.Vector3dVector(pts.astype(np.float64))
                     if self.compute_normals_every > 0 and (frame % self.compute_normals_every) == 0:

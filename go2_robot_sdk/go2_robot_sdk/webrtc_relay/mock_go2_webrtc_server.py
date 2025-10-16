@@ -349,8 +349,6 @@ class MockGo2EncryptedServer:
         # Finish SDP
         await pc.setRemoteDescription(RTCSessionDescription(sdp=remote_sdp, type=remote_type))
         answer = await pc.createAnswer()
-        if answer is None:
-            raise RuntimeError("failed to create answer")
         
         await pc.setLocalDescription(answer)
 

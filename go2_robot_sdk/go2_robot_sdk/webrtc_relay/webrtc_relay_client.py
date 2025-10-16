@@ -1,5 +1,4 @@
-from aiortc import MediaStreamTrack
-from aiortc.rtcpeerconnection import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel
 import asyncio
 import contextlib
 import httpx
