@@ -4,29 +4,42 @@
 import asyncio
 import json
 import logging
-from typing import Callable, Dict, Any, Optional, Coroutine
-from aiortc import MediaStreamTrack
+from typing import Dict, Any
 
-from go2_robot_sdk.domain.interfaces.robot_data_receiver import IRobotDataReceiver
-from go2_robot_sdk.domain.interfaces.robot_controller import IRobotController
-from go2_robot_sdk.domain.entities.robot_config import RobotConfig
-from go2_robot_sdk.domain.entities.robot_data import RobotData
-from .go2_connection import Go2Connection
-from go2_robot_sdk.application.utils.command_generator import gen_command, gen_mov_command
+
+
 from go2_robot_sdk.domain.constants.robot_commands import ROBOT_CMD
 from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
+from go2_robot_sdk.domain.entities.robot_data import RobotData
+from go2_robot_sdk.domain.entities.robot_config import RobotConfig
+from go2_robot_sdk.domain.interfaces.robot_data_receiver import IRobotDataReceiver
+from go2_robot_sdk.domain.interfaces.robot_controller import IRobotController
+from go2_robot_sdk.infrastructure.webrtc.go2_connection import (
+    Go2Connection,
+    OnValidatedCB,
+    OnMessageCB,  # pyright: ignore[reportUnusedImport]
+    OnOpenCB, # pyright: ignore[reportUnusedImport]
+    OnVideoFrameCB,
+)
+from go2_robot_sdk.application.utils.command_generator import gen_command, gen_mov_command
 
 logger = logging.getLogger(__name__)
-
 
 class WebRTCAdapter(IRobotDataReceiver, IRobotController):
     """WebRTC adapter for robot communication"""
 
-    def __init__(self, config: RobotConfig, on_validated_callback: Callable[[str], None], on_video_frame_callback: Optional[Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]] = None, event_loop=None):
+    def __init__(
+        self, 
+        config: RobotConfig, 
+        on_validated_callback: OnValidatedCB, 
+        on_data_callback: OnMessageCB,
+        on_video_frame_callback: OnVideoFrameCB | None = None, 
+        event_loop: asyncio.AbstractEventLoop | None = None
+    ):
         self.config = config
         self.connections: Dict[str, Go2Connection] = {}
-        self.data_callback: Callable[[RobotData], None] | None = None
-        self.webrtc_msgs = asyncio.Queue()
+        self.data_callback = on_data_callback
+        self.webrtc_msgs = asyncio.Queue[str]()
         self.on_validated_callback = on_validated_callback
         self.on_video_frame_callback = on_video_frame_callback
         # Store the event loop (passed from main thread or detect current)
@@ -46,7 +59,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             
             conn = Go2Connection(
                 robot_ip=robot_ip,
-                robot_num=robot_id,  # type: ignore
+                robot_num=int(robot_id),
                 token=self.config.token,
                 on_validated=self._on_validated,
                 on_message=self._on_data_channel_message, # type: ignore
@@ -79,7 +92,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             except Exception as e:
                 logger.error(f"Error disconnecting from robot {robot_id}: {e}")
 
-    def set_data_callback(self, callback: Callable[[RobotData], None]) -> None:
+    def set_data_callback(self, callback: OnMessageCB) -> None:
         """Set callback for data reception"""
         self.data_callback = callback
 
@@ -155,7 +168,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
         except Exception as e:
             logger.error(f"Error sending stand down command: {e}")
 
-    def send_webrtc_request(self, robot_id: str, api_id: int, parameter: Any, topic: str) -> None:
+    def send_webrtc_request(self, robot_id: str, api_id: int, parameter: str | dict[str, Any], topic: str) -> None:
         """Send WebRTC request"""
         try:
             payload = gen_command(api_id, parameter, topic)
@@ -189,14 +202,10 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
         except Exception as e:
             logger.error(f"Error in validated callback: {e}")
 
-    def _on_data_channel_message(self, _, msg: Dict[str, Any], robot_id: str) -> None:
+    def _on_data_channel_message(self, msg: RobotData) -> None:
         """Handle incoming data channel messages"""
         try:
-            if self.data_callback:
-                # Создаем объект RobotData для передачи в callback
-                # Фактическая обработка будет в RobotDataService
-                _robot_data = RobotData(robot_id=robot_id, timestamp=0.0)
-                self.data_callback(msg, robot_id)  # Передаем сырые данные для обработки # type: ignore
-                
+            self.data_callback(msg)
+        
         except Exception as e:
             logger.error(f"Error processing data channel message: {e}") 

@@ -18,7 +18,6 @@ from Crypto.Cipher import AES, PKCS1_v1_5
 
 class EncryptionError(Exception):
     """Custom exception for encryption-related errors"""
-    pass
 
 
 class CryptoUtils:
@@ -38,7 +37,7 @@ class CryptoUtils:
             key_bytes = base64.b64decode(pem_data)
             return RSA.import_key(key_bytes)
         except Exception as e:
-            raise EncryptionError(f"Failed to load RSA public key: {e}")
+            raise EncryptionError(f"Failed to load RSA public key: {e}") from e
     
     @staticmethod
     def pad(data: str) -> bytes:
@@ -139,7 +138,7 @@ class ValidationCrypto:
             bytes_array = bytes.fromhex(hex_str)
             return base64.b64encode(bytes_array).decode("utf-8")
         except Exception as e:
-            raise EncryptionError(f"Failed to convert hex to base64: {e}")
+            raise EncryptionError(f"Failed to convert hex to base64: {e}") from e
     
     @staticmethod
     def encrypt_key(key: str) -> str:
@@ -149,7 +148,7 @@ class ValidationCrypto:
             encrypted = ValidationCrypto.encrypt_by_md5(prefixed_key)
             return ValidationCrypto.hex_to_base64(encrypted)
         except Exception as e:
-            raise EncryptionError(f"Failed to encrypt validation key: {e}")
+            raise EncryptionError(f"Failed to encrypt validation key: {e}") from e
     
     @staticmethod
     def encrypt_by_md5(input_str: str) -> str:
@@ -159,7 +158,7 @@ class ValidationCrypto:
             hash_obj.update(input_str.encode("utf-8"))
             return hash_obj.hexdigest()
         except Exception as e:
-            raise EncryptionError(f"Failed to create MD5 hash: {e}")
+            raise EncryptionError(f"Failed to create MD5 hash: {e}") from e
 
 
 class PathCalculator:
@@ -199,4 +198,4 @@ class PathCalculator:
             return join_to_string
             
         except Exception as e:
-            raise EncryptionError(f"Failed to calculate path ending: {e}") 
+            raise EncryptionError(f"Failed to calculate path ending: {e}") from e

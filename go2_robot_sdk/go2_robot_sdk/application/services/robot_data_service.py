@@ -7,10 +7,10 @@ from typing import Dict, Any
 
 from go2_robot_sdk.domain.entities.robot_data import RobotData, RobotState, IMUData, OdometryData, JointData, LidarData
 from go2_robot_sdk.domain.interfaces.robot_data_publisher import IRobotDataPublisher
-from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 
 logger = logging.getLogger(__name__)
 
+# NOTE: parsing has been moved to its own file, so this is just publishing now
 
 class RobotDataService:
     """Service for processing and validating robot data"""
@@ -18,27 +18,27 @@ class RobotDataService:
     def __init__(self, publisher: IRobotDataPublisher):
         self.publisher = publisher
 
-    def process_webrtc_message(self, msg: Dict[str, Any], robot_id: str) -> None:
+    def process_webrtc_message(self, robot_data: RobotData) -> None:
         """Process WebRTC message"""
         try:
-            topic = msg.get('topic')
-            robot_data = RobotData(robot_id=robot_id, timestamp=0.0)
+            # topic = msg.get('topic')
+            # robot_data = RobotData(robot_id=msg.robot_id, timestamp=0.0)
 
-            if topic == RTC_TOPIC["ULIDAR_ARRAY"]:
-                self._process_lidar_data(msg, robot_data)
+            if robot_data.lidar_data is not None:
+                # self._process_lidar_data(msg, robot_data)
                 self.publisher.publish_lidar_data(robot_data)
                 self.publisher.publish_voxel_data(robot_data)
 
-            elif topic == RTC_TOPIC["ROBOTODOM"]:
-                self._process_odometry_data(msg, robot_data)
+            elif robot_data.odometry_data is not None:
+                # self._process_odometry_data(msg, robot_data)
                 self.publisher.publish_odometry(robot_data)
 
-            elif topic == RTC_TOPIC["LF_SPORT_MOD_STATE"]:
-                self._process_sport_mode_state(msg, robot_data)
+            elif robot_data.robot_state is not None:
+                # self._process_sport_mode_state(msg, robot_data)
                 self.publisher.publish_robot_state(robot_data)
 
-            elif topic == RTC_TOPIC["LOW_STATE"]:
-                self._process_low_state(msg, robot_data)
+            elif robot_data.joint_data is not None:
+                # self._process_low_state(msg, robot_data)
                 self.publisher.publish_joint_state(robot_data)
 
         except Exception as e:
