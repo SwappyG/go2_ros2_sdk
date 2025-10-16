@@ -63,6 +63,7 @@ class Go2DriverNode(Node):
             on_validated_callback=self._on_robot_validated,
             on_video_frame_callback=self._on_video_frame if self.config.enable_video else None,
             event_loop=self.event_loop,
+            on_data_callback=self._on_robot_data_received
         )
         
         self.robot_control_service = RobotControlService(self.webrtc_adapter)
@@ -283,7 +284,7 @@ class Go2DriverNode(Node):
 
     def _on_robot_data_received(self, robot_data: RobotData) -> None:
         """Callback for receiving data from robot"""
-        self.robot_data_service.process_webrtc_message(robot_data)  # type: ignore
+        self.robot_data_service.process_webrtc_message(robot_data)
 
     async def _on_video_frame(self, track: MediaStreamTrack, robot_id: str) -> None:
         """Callback for processing video frames"""

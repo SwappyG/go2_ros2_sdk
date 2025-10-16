@@ -12,41 +12,59 @@ Big thanks to @tfoldi (Földi Tamás) and @legion1581 (The RoboVerse Discord Gro
 import json
 import logging
 import base64
-from typing import Callable, Optional, Any, Dict, Union, Coroutine
+from typing import Callable, Any, Coroutine, TypeAlias
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 
 from go2_robot_sdk.infrastructure.webrtc.crypto.encryption import CryptoUtils, ValidationCrypto, PathCalculator, EncryptionError
-from .http_client import HttpClient, WebRTCHttpError
-from .data_decoder import WebRTCDataDecoder, DataDecodingError  # pyright: ignore[reportUnusedImport]
+from go2_robot_sdk.infrastructure.webrtc.http_client import HttpClient, WebRTCHttpError
+from go2_robot_sdk.infrastructure.webrtc.data_decoder import (
+    WebRTCDataDecoder,
+    DataDecodingError, # pyright: ignore[reportUnusedImport]
+)
+from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer
+from go2_robot_sdk.domain.entities.robot_data import RobotData
+import go2_robot_sdk.infrastructure.webrtc.go2_message_parsers as go2_parsers
 
 logger = logging.getLogger(__name__)
+
+OnValidatedCB: TypeAlias = Callable[[str], None]
+OnMessageCB: TypeAlias = Callable[[RobotData], None]
+OnOpenCB: TypeAlias = Callable[[], None]
+OnVideoFrameCB: TypeAlias = Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]
 
 
 class Go2ConnectionError(Exception):
     """Custom exception for Go2 connection errors"""
-    pass
 
 
 class Go2Connection:
     """Full WebRTC connection to Go2 robot with encryption and proper signaling"""
     
+    hex_to_base64 = ValidationCrypto.hex_to_base64
+    encrypt_key = ValidationCrypto.encrypt_key
+    encrypt_by_md5 = ValidationCrypto.encrypt_by_md5
+    deal_array_buffer = staticmethod(legacy_deal_array_buffer)
+
+    __enter__ = lambda self: self
+    __exit__ = lambda self, type_, value, traceback: self.shutdown()
+
     def __init__(
         self,
         robot_ip: str,
         robot_num: int,
         token: str = "",
-        on_validated: Optional[Callable[[str], None]] = None,
-        on_message: Optional[Callable[[str|bytes, dict[str, Any] | None, str], None]] = None,
-        on_open: Optional[Callable[[],None]] = None,
-        on_video_frame: Optional[Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]] = None,
+        on_validated: OnValidatedCB | None = None,
+        on_message: OnMessageCB | None = None,
+        on_open: OnOpenCB | None = None,
+        on_video_frame: OnVideoFrameCB | None = None,
         decode_lidar: bool = True,
+        decode_message: bool = True,
     ):
         self.pc = RTCPeerConnection()
         self.robot_ip = robot_ip
         self.robot_num = str(robot_num)
         self.token = token
-        self.robot_validation = "PENDING"
-        self.validation_result = "PENDING"
+        self.is_validated = False
         
         # Callbacks
         self.on_validated = on_validated
@@ -54,13 +72,15 @@ class Go2Connection:
         self.on_open = on_open
         self.on_video_frame = on_video_frame
         self.decode_lidar = decode_lidar
+        self._decode_message = decode_message
         
         # Initialize components
         self.http_client = HttpClient(timeout=10.0)
+
         self.data_decoder = WebRTCDataDecoder(enable_lidar_decoding=decode_lidar)
         
         # Setup data channel
-        self.data_channel = self.pc.createDataChannel("data", id=0)
+        self.data_channel = self.pc.createDataChannel("data") # id=0
         self.data_channel.on("open", self.on_data_channel_open)
         self.data_channel.on("message", self.on_data_channel_message)
         
@@ -79,75 +99,109 @@ class Go2Connection:
         # Note: Validation is handled after successful WebRTC connection
         # in the original implementation, not here
     
-    def on_data_channel_open(self) -> None:
+    def on_data_channel_open(self, *_args) -> None:
         """Handle data channel open event"""
         logger.info("Data channel is open")
-        
         # Force data channel to open state if needed (workaround)
         if self.data_channel.readyState != "open":
             self.data_channel._setReadyState("open")  # pyright: ignore[reportPrivateUsage]
         
         if self.on_open:
             self.on_open()
-    
-    def on_data_channel_message(self, message: Union[str, bytes]) -> None:
+
+    def on_data_channel_message(self, message: Any) -> None:
         """Handle incoming data channel messages"""
         try:
-            logger.debug(f"Received message: {message}")
-            
-            # Ensure data channel is marked as open
+            # if we got a message, we're definely connected. For some reason, the "open" hook
+            # doesn't always fire. Let's force it here. 
             if self.data_channel.readyState != "open":
-                self.data_channel._setReadyState("open")  # pyright: ignore[reportPrivateUsage]
-            
-            msgobj = None
-            
-            if isinstance(message, str):
-                # Text message - likely JSON
-                try:
-                    msgobj = json.loads(message)
-                    if msgobj.get("type") == "validation":
-                        self.validate_robot_conn(msgobj)
-                except json.JSONDecodeError:
-                    logger.warning("Failed to decode JSON message")
-                    
-            elif isinstance(message, bytes):  # type: ignore
-                # Binary message - likely compressed data
-                msgobj = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
-            
-            # Forward message to callback
-            if self.on_message:
-                self.on_message(message, msgobj, self.robot_num)
+                self.data_channel._setReadyState("open") # pyright: ignore[reportPrivateUsage]
+
+            logger.debug(f"Received message: {message}")
+
+            # if we're not validated, we have to parse every message we get to see if there's
+            # a validation message
+            raw_message_obj = None
+            if not self.is_validated and isinstance(message, str):
+                raw_message_obj = go2_parsers.parse_datachannel_message(message)
+                if raw_message_obj['type'] == 'validation':
+                    self.validate_robot_conn(raw_message_obj['data'])
+                    return
+
+            # if there's no callback, don't bother parsing
+            # NOTE - in the future, we may still want to parse to display error messages
+            if self.on_message is None:
+                return
+
+             
+            # If we're not supposed to decode the message (ie, something upstream will handle it),
+            # then just forward what we got
+            if not self._decode_message:
+                logger.debug(f"decode is set to false, sending raw message back")
+                self.on_message(RobotData(robot_id=self.robot_num, timestamp=0.0, raw_message=message))
+                return
                 
-        except Exception as e:
-            logger.error(f"Error processing data channel message: {e}")
+            logger.debug(f"decode is set to true, decoding message")
+            robot_data = None
+            if isinstance(message, str):
+                # we may have already parsed the data during the validation step. If not tho, parse 
+                # it now
+                if raw_message_obj is None:
+                    raw_message_obj = go2_parsers.parse_datachannel_message(message)
+                robot_data = go2_parsers.process_webrtc_message(raw_message_obj, self.robot_num)
+            
+            elif isinstance(message, bytes):
+                lidar_frame = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
+                logger.info(f"{lidar_frame=}")
+                if lidar_frame is not None:
+                    robot_data = go2_parsers.process_webrtc_message(lidar_frame, self.robot_num)
+                    
+            else: 
+                logger.warning(f"unknown message type receieved from on_message callback. {message=}")
+                return
+            
+            if robot_data is not None:
+                robot_data.raw_message = message
+                self.on_message(robot_data)
+                
+        except Exception as exception:
+            logger.error(f"Error processing data channel message: {exception=}")
     
     async def on_track(self, track: MediaStreamTrack) -> None:
         """Handle incoming media tracks (video)"""
-        logger.info("Receiving video")
+        if track.kind != "video":
+            logger.info(f"Received a track, but it wasn't video: {track=}")
+            return None
         
-        if track.kind == "video" and self.on_video_frame is not None:
-            try:
-                await self.on_video_frame(track, self.robot_num)
-            except Exception as e:
-                logger.error(f"Error in video frame callback: {e}")
-    
-    def validate_robot_conn(self, message: Dict[str, Any]) -> None:
-        """Handle robot validation response"""
+        logger.info(f"Received a video track: {track=}")
+        if not self.on_video_frame:
+            logger.warning(f"there's no callback registered to consume video track")
+            return
+        
         try:
-            if message.get("data") == "Validation Ok.":
+            await self.on_video_frame(track, self.robot_num)
+        except Exception as exception:
+            logger.error(f"Error in video frame callback: {exception=}")
+    
+    def validate_robot_conn(self, message: str) -> None:
+        """Handle robot validation response"""
+        logger.info(f"received validation data: {message=}")
+        try:
+            if message == "Validation Ok.":
+                logger.info("Robot validation successful. Setting video to ON")
                 # Turn on video
                 self.publish("", "on", "vid")
                 
-                self.validation_result = "SUCCESS"
-                self.robot_validation = "OK"
+                self.is_validated = True
                 
                 if self.on_validated:
+                    logger.info("validation hook registered, calling hook")
                     self.on_validated(self.robot_num)
                     
-                logger.info("Robot validation successful")
             else:
+                logger.info("got validation key, encrypting and sending back")
                 # Send encrypted validation response
-                validation_key = message.get("data", "")
+                validation_key = message
                 encrypted_key = ValidationCrypto.encrypt_key(validation_key)
                 self.publish("", encrypted_key, "validation")
                 
@@ -164,23 +218,31 @@ class Go2Connection:
             msg_type: Message type
         """
         try:
-            if self.data_channel.readyState != "open":
-                logger.warning(f"Data channel is not open. State is {self.data_channel.readyState}")
-                return
-            
             payload = {
                 "type": msg_type,
                 "topic": topic,
                 "data": data
             }
-            
+            print(payload)
             payload_str = json.dumps(payload)
-            logger.info(f"-> Sending message {payload_str}")
+            print(f"-> Sending message {payload_str}")
             self.data_channel.send(payload_str)
             
         except Exception as e:
-            logger.error(f"Failed to publish message: {e}")
+            logger.error(f"Failed to publish message: {e=}")
     
+    def publish_json_str(self, json_str: str) -> None:
+        try:
+            if self.data_channel.readyState != "open":
+                logger.warning(f"Data channel is not open. State is {self.data_channel.readyState}")
+                return
+            
+            print(f"-> Sending message {json_str}")
+            self.data_channel.send(json_str)
+            
+        except Exception as e:
+            logger.error(f"Failed to publish message: {e}")
+
     async def disableTrafficSaving(self, switch: bool) -> bool:
         """
         Disable traffic saving mode for better data transmission.
@@ -297,29 +359,19 @@ class Go2Connection:
         try:
             # Close peer connection
             await self.pc.close()
-            
-            # Close HTTP client
-            self.http_client.close()
-            
-            logger.info(f"Disconnected from robot {self.robot_num}")
-            
         except Exception as e:
-            logger.error(f"Error disconnecting: {e}")
-    
-    def __del__(self):
-        """Cleanup on object destruction"""
+            logger.error(f"error closing peer connection: {e=}")
+            
         try:
-            if hasattr(self, 'http_client'):
-                self.http_client.close()
-        except:
-            pass
-
-
-# Static methods for backward compatibility
-Go2Connection.hex_to_base64 = ValidationCrypto.hex_to_base64  # type: ignore
-Go2Connection.encrypt_key = ValidationCrypto.encrypt_key  # type: ignore
-Go2Connection.encrypt_by_md5 = ValidationCrypto.encrypt_by_md5  # type: ignore
-
-# Use the legacy deal_array_buffer function for full compatibility
-from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer 
-Go2Connection.deal_array_buffer = staticmethod(legacy_deal_array_buffer)  # type: ignore 
+            self.data_channel.close()
+        except Exception as e:
+            logger.error(f"error closing peer connection datachannel: {e=}")
+        
+        try:
+            self.http_client.close()
+        except Exception as e:
+            logger.error(f"error closing http client: {e=}")
+            
+        logger.info(f"Disconnected from robot {self.robot_num}")
+            
+    
