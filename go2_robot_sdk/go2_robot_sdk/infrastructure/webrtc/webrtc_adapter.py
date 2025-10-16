@@ -4,13 +4,17 @@
 import asyncio
 import json
 import logging
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, Optional, Coroutine
+from aiortc import MediaStreamTrack
 
-from ...domain.interfaces import IRobotDataReceiver, IRobotController
-from ...domain.entities import RobotData, RobotConfig
+from go2_robot_sdk.domain.interfaces.robot_data_receiver import IRobotDataReceiver
+from go2_robot_sdk.domain.interfaces.robot_controller import IRobotController
+from go2_robot_sdk.domain.entities.robot_config import RobotConfig
+from go2_robot_sdk.domain.entities.robot_data import RobotData
 from .go2_connection import Go2Connection
-from ...application.utils.command_generator import gen_command, gen_mov_command
-from ...domain.constants import ROBOT_CMD, RTC_TOPIC
+from go2_robot_sdk.application.utils.command_generator import gen_command, gen_mov_command
+from go2_robot_sdk.domain.constants.robot_commands import ROBOT_CMD
+from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +22,10 @@ logger = logging.getLogger(__name__)
 class WebRTCAdapter(IRobotDataReceiver, IRobotController):
     """WebRTC adapter for robot communication"""
 
-    def __init__(self, config: RobotConfig, on_validated_callback: Callable, on_video_frame_callback: Callable = None, event_loop=None):
+    def __init__(self, config: RobotConfig, on_validated_callback: Callable[[str], None], on_video_frame_callback: Optional[Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]] = None, event_loop=None):
         self.config = config
         self.connections: Dict[str, Go2Connection] = {}
-        self.data_callback: Callable[[RobotData], None] = None
+        self.data_callback: Callable[[RobotData], None] | None = None
         self.webrtc_msgs = asyncio.Queue()
         self.on_validated_callback = on_validated_callback
         self.on_video_frame_callback = on_video_frame_callback
@@ -42,10 +46,10 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             
             conn = Go2Connection(
                 robot_ip=robot_ip,
-                robot_num=robot_id,
+                robot_num=robot_id,  # type: ignore
                 token=self.config.token,
                 on_validated=self._on_validated,
-                on_message=self._on_data_channel_message,
+                on_message=self._on_data_channel_message, # type: ignore
                 on_video_frame=self.on_video_frame_callback if self.config.enable_video else None,
                 decode_lidar=self.config.decode_lidar,
             )
@@ -180,8 +184,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                     self.connections[robot_id].data_channel.send(
                         json.dumps({"type": "subscribe", "topic": topic}))
             
-            if self.on_validated_callback:
-                self.on_validated_callback(robot_id)
+            self.on_validated_callback(robot_id)
                 
         except Exception as e:
             logger.error(f"Error in validated callback: {e}")
@@ -192,8 +195,8 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             if self.data_callback:
                 # Создаем объект RobotData для передачи в callback
                 # Фактическая обработка будет в RobotDataService
-                robot_data = RobotData(robot_id=robot_id, timestamp=0.0)
-                self.data_callback(msg, robot_id)  # Передаем сырые данные для обработки
+                _robot_data = RobotData(robot_id=robot_id, timestamp=0.0)
+                self.data_callback(msg, robot_id)  # Передаем сырые данные для обработки # type: ignore
                 
         except Exception as e:
             logger.error(f"Error processing data channel message: {e}") 

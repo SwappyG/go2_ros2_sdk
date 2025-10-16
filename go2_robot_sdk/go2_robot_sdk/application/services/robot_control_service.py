@@ -5,9 +5,9 @@ import json
 import logging
 
 
-from ...domain.interfaces import IRobotController
-from ..utils.command_generator import gen_mov_command
-from ...domain.constants import RTC_TOPIC
+from go2_robot_sdk.domain.interfaces.robot_controller import IRobotController
+from go2_robot_sdk.application.utils.command_generator import gen_mov_command
+from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class RobotControlService:
         except Exception as e:
             logger.error(f"Error handling WebRTC request: {e}")
 
-    def handle_joy_command(self, joy_buttons: list, robot_id: str) -> None:
+    def handle_joy_command(self, joy_buttons: list[bool], robot_id: str) -> None:
         """Process joystick commands"""
         try:
             if joy_buttons and len(joy_buttons) > 1:

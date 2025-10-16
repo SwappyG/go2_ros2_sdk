@@ -9,16 +9,15 @@ https://github.com/legion1581/go2_webrtc_connect
 Big thanks to @tfoldi (Földi Tamás) and @legion1581 (The RoboVerse Discord Group)
 """
 
-import asyncio
 import json
 import logging
 import base64
-from typing import Callable, Optional, Any, Dict, Union
+from typing import Callable, Optional, Any, Dict, Union, Coroutine
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 
-from .crypto.encryption import CryptoUtils, ValidationCrypto, PathCalculator, EncryptionError
+from go2_robot_sdk.infrastructure.webrtc.crypto.encryption import CryptoUtils, ValidationCrypto, PathCalculator, EncryptionError
 from .http_client import HttpClient, WebRTCHttpError
-from .data_decoder import WebRTCDataDecoder, DataDecodingError
+from .data_decoder import WebRTCDataDecoder, DataDecodingError  # pyright: ignore[reportUnusedImport]
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +35,10 @@ class Go2Connection:
         robot_ip: str,
         robot_num: int,
         token: str = "",
-        on_validated: Optional[Callable] = None,
-        on_message: Optional[Callable] = None,
-        on_open: Optional[Callable] = None,
-        on_video_frame: Optional[Callable] = None,
+        on_validated: Optional[Callable[[str], None]] = None,
+        on_message: Optional[Callable[[str|bytes, dict[str, Any] | None, str], None]] = None,
+        on_open: Optional[Callable[[],None]] = None,
+        on_video_frame: Optional[Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]] = None,
         decode_lidar: bool = True,
     ):
         self.pc = RTCPeerConnection()
@@ -86,7 +85,7 @@ class Go2Connection:
         
         # Force data channel to open state if needed (workaround)
         if self.data_channel.readyState != "open":
-            self.data_channel._setReadyState("open")
+            self.data_channel._setReadyState("open")  # pyright: ignore[reportPrivateUsage]
         
         if self.on_open:
             self.on_open()
@@ -98,7 +97,7 @@ class Go2Connection:
             
             # Ensure data channel is marked as open
             if self.data_channel.readyState != "open":
-                self.data_channel._setReadyState("open")
+                self.data_channel._setReadyState("open")  # pyright: ignore[reportPrivateUsage]
             
             msgobj = None
             
@@ -111,7 +110,7 @@ class Go2Connection:
                 except json.JSONDecodeError:
                     logger.warning("Failed to decode JSON message")
                     
-            elif isinstance(message, bytes):
+            elif isinstance(message, bytes):  # type: ignore
                 # Binary message - likely compressed data
                 msgobj = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
             
@@ -126,7 +125,7 @@ class Go2Connection:
         """Handle incoming media tracks (video)"""
         logger.info("Receiving video")
         
-        if track.kind == "video" and self.on_video_frame:
+        if track.kind == "video" and self.on_video_frame is not None:
             try:
                 await self.on_video_frame(track, self.robot_num)
             except Exception as e:
@@ -317,10 +316,10 @@ class Go2Connection:
 
 
 # Static methods for backward compatibility
-Go2Connection.hex_to_base64 = ValidationCrypto.hex_to_base64
-Go2Connection.encrypt_key = ValidationCrypto.encrypt_key
-Go2Connection.encrypt_by_md5 = ValidationCrypto.encrypt_by_md5
+Go2Connection.hex_to_base64 = ValidationCrypto.hex_to_base64  # type: ignore
+Go2Connection.encrypt_key = ValidationCrypto.encrypt_key  # type: ignore
+Go2Connection.encrypt_by_md5 = ValidationCrypto.encrypt_by_md5  # type: ignore
 
 # Use the legacy deal_array_buffer function for full compatibility
-from .data_decoder import deal_array_buffer as legacy_deal_array_buffer
-Go2Connection.deal_array_buffer = staticmethod(legacy_deal_array_buffer) 
+from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer 
+Go2Connection.deal_array_buffer = staticmethod(legacy_deal_array_buffer)  # type: ignore 

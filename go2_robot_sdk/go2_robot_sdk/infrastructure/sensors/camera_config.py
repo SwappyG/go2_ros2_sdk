@@ -12,10 +12,31 @@ import glob
 import os
 import re
 from typing import Dict, Optional
-from sensor_msgs.msg import CameraInfo
-from ament_index_python.packages import get_package_share_directory
+from pydantic import BaseModel
+from pathlib import Path
+import go2_robot_sdk
+
+try:
+    from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
+except ImportError:
+    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent)
 
 logger = logging.getLogger(__name__)
+
+class GO2CameraInfoMatrix(BaseModel):
+    rows: int
+    cols: int
+    data: list[float]  # flattened, row by row
+
+class GO2CameraInfo(BaseModel):
+    image_width: int
+    image_height: int
+    camera_name: str
+    camera_matrix: GO2CameraInfoMatrix
+    distortion_model: str
+    distortion_coefficients: GO2CameraInfoMatrix
+    rectification_matrix: GO2CameraInfoMatrix
+    projection_matrix: GO2CameraInfoMatrix
 
 
 class CameraConfigLoader:
@@ -23,15 +44,14 @@ class CameraConfigLoader:
     
     def __init__(self, package_name: str = 'go2_robot_sdk'):
         self.package_name = package_name
-        self._camera_info_cache: Optional[Dict[int, CameraInfo]] = None
+        self._camera_info_cache: Optional[Dict[int, GO2CameraInfo]] = None
     
     def get_supported_resolutions(self) -> list[int]:
         """Get list of supported camera resolutions"""
         try:
-            calibration_dir = os.path.join(
-                get_package_share_directory(self.package_name),
-                "calibration"
-            )
+
+            # calibration_dir = pathlib.Path(__file__).parent.parent.parent.parent / "calibration"
+            calibration_dir = Path(get_package_share_directory(self.package_name)) / "calibration"
             
             pattern = os.path.join(calibration_dir, "front_camera_*.yaml")
             files = glob.glob(pattern)
@@ -49,7 +69,7 @@ class CameraConfigLoader:
             logger.error(f"Failed to get supported resolutions: {e}")
             return []
     
-    def load_camera_info_for_resolution(self, height: int) -> Optional[CameraInfo]:
+    def load_camera_info_for_resolution(self, height: int) -> Optional[GO2CameraInfo]:
         """
         Load camera info for specific resolution.
         
@@ -60,13 +80,9 @@ class CameraConfigLoader:
             CameraInfo message or None if loading fails
         """
         try:
-            yaml_file = os.path.join(
-                get_package_share_directory(self.package_name),
-                "calibration",
-                f"front_camera_{height}.yaml"
-            )
+            yaml_file = Path(get_package_share_directory(self.package_name)) / "calibration" / f"front_camera_{height}.yaml"
             
-            if not os.path.exists(yaml_file):
+            if not yaml_file.exists():
                 logger.warning(f"Camera calibration file not found: {yaml_file}")
                 return None
             
@@ -76,22 +92,22 @@ class CameraConfigLoader:
                 camera_data = yaml.safe_load(file_handle)
             
             # Create and populate CameraInfo message
-            camera_info = CameraInfo()
-            camera_info.width = camera_data["image_width"]
-            camera_info.height = camera_data["image_height"]
-            camera_info.k = camera_data["camera_matrix"]["data"]
-            camera_info.d = camera_data["distortion_coefficients"]["data"]
-            camera_info.r = camera_data["rectification_matrix"]["data"]
-            camera_info.p = camera_data["projection_matrix"]["data"]
-            camera_info.distortion_model = camera_data["distortion_model"]
-            
-            return camera_info
+            return GO2CameraInfo(
+                camera_name=camera_data["camera_name"],
+                image_width=camera_data["image_width"],
+                image_height=camera_data["image_height"],
+                camera_matrix=GO2CameraInfoMatrix(rows=3, cols=3, data=camera_data["camera_matrix"]["data"]),
+                distortion_coefficients=GO2CameraInfoMatrix(rows=1, cols=5, data=camera_data["distortion_coefficients"]["data"]),
+                rectification_matrix=GO2CameraInfoMatrix(rows=3, cols=3, data=camera_data["rectification_matrix"]["data"]),
+                projection_matrix=GO2CameraInfoMatrix(rows=3, cols=4, data=camera_data["projection_matrix"]["data"]),
+                distortion_model=camera_data["distortion_model"],
+            )
             
         except Exception as e:
             logger.error(f"Failed to load camera info for height {height}: {e}")
             return None
     
-    def load_all_camera_info(self) -> Dict[int, CameraInfo]:
+    def load_all_camera_info(self) -> Dict[int, GO2CameraInfo]:
         """
         Load camera info for all supported resolutions.
         
@@ -114,7 +130,7 @@ class CameraConfigLoader:
         self._camera_info_cache = camera_info_dict
         return camera_info_dict
     
-    def get_camera_info(self, height: int) -> Optional[CameraInfo]:
+    def get_camera_info(self, height: int) -> Optional[GO2CameraInfo]:
         """
         Get camera info for specific height with caching.
         
@@ -125,7 +141,7 @@ class CameraConfigLoader:
             CameraInfo message or None if not available
         """
         if self._camera_info_cache is None:
-            self.load_all_camera_info()
+            self._camera_info_cache = self.load_all_camera_info()
         
         return self._camera_info_cache.get(height)
 
@@ -142,7 +158,7 @@ def get_camera_loader() -> CameraConfigLoader:
     return _camera_loader
 
 
-def load_camera_info() -> Dict[int, CameraInfo]:
+def load_camera_info() -> Dict[int, GO2CameraInfo]:
     """
     Load camera info for all supported resolutions.
     Backward compatibility function.

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 import numpy as np
+import numpy.typing as npt
 
 
 @dataclass
@@ -47,8 +48,8 @@ class JointData:
 @dataclass
 class LidarData:
     """LiDAR sensor data"""
-    positions: np.ndarray
-    uvs: np.ndarray
+    positions: npt.NDArray[np.uint8]
+    uvs: npt.NDArray[np.uint8]
     resolution: float
     origin: List[float]
     stamp: float
@@ -60,7 +61,7 @@ class LidarData:
 @dataclass
 class CameraData:
     """Camera data"""
-    image: np.ndarray
+    image: npt.NDArray[np.uint8]
     height: int
     width: int
     encoding: str = "bgr8"
@@ -76,4 +77,4 @@ class RobotData:
     odometry_data: Optional[OdometryData] = None
     joint_data: Optional[JointData] = None
     lidar_data: Optional[LidarData] = None
-    camera_data: Optional[CameraData] = None 
+    camera_data: Optional[CameraData] = None
