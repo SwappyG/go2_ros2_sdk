@@ -43,7 +43,7 @@ class WebRTCRelayClient:
     ):
         self.url = relay_url
         self.robot_config = robot_config
-        self.client = httpx.AsyncClient(timeout=10.0)
+        self.client = httpx.AsyncClient(timeout=60.0)
         self._on_robot_data = on_robot_data
         self._on_video_track = on_video_track
         self._on_lidar_frame = on_lidar_frame
