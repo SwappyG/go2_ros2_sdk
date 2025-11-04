@@ -158,7 +158,7 @@ class WebRTCRelayClient:
             robot_ip=self.robot_config.robot_ip_list[0],
             robot_num=1,  # TODO (swapnil) - pipe this properly
             token=self.robot_config.token
-        ).model_dump())
+        ).model_dump(), timeout=60.0)
         if r.status_code != 200:
             err_json = r.json()
             logger.warning(f"{r.status_code=} {err_json=}")
