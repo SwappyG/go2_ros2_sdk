@@ -8,7 +8,7 @@ from Crypto.Cipher import AES, PKCS1_v1_5
 import hashlib
 import json
 import logging
-import typing as  t
+import typing as t
 import uuid
 import base64
 import json
@@ -203,7 +203,7 @@ class MockGo2EncryptedServer:
         Read a JSONL lidar dump where each line is {"frame": "<base64>"}.
         Returns a dict mapping line index -> {"b64": str, "raw": bytes}.
         """
-        frames: t.Dict[int, t.Dict[str, t.Any]] = {}
+        frames: t.Dict[int, bytes] = {}
         with open(path, "r", encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 line = line.strip()
