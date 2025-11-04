@@ -321,38 +321,53 @@ if __name__ == "__main__":
 
             display_task = asyncio.create_task(display_video(track))        
 
+        import json
+        import base64
 
-        vmv_viewer = vmv.VoxelMapViewer(flip_winding=False, compute_normals_every=1)
-        try:
-            vmv_viewer.start()
-            async def on_lidar_update(lidar_frame: dict[str, t.Any]):
-                dec = lidar_frame["decoded_data"]
-                meta = lidar_frame["data"]
-                positions = dec["positions"]           # np.uint8, length = face_count*12
-                face_count = int(dec["face_count"])
-                vmv_viewer.submit_u8(
-                    positions_u8=positions,
-                    face_count=face_count,
-                    resolution=float(meta["resolution"]),
-                    origin_xyz=meta["origin"],
-                )
+        vmv_viewer = vmv.VoxelMapViewer(flip_winding=False, compute_normals_every=1)        
+        with open("C:/Users/Swapnil/Documents/lidar_dump.txt", mode="w+") as ff:
+            num_writes = 0
+            try:
+                vmv_viewer.start()
+                async def on_lidar_update(lidar_frame: dict[str, t.Any]):
+                    global num_writes
+                    dec = lidar_frame["decoded_data"]
+                    meta = lidar_frame["data"]
+                    positions = dec["positions"]           # np.uint8, length = face_count*12
+                    face_count = int(dec["face_count"])
+                    vmv_viewer.submit_u8(
+                        positions_u8=positions,
+                        face_count=face_count,
+                        resolution=float(meta["resolution"]),
+                        origin_xyz=meta["origin"],
+                    )
+                    if num_writes < 1000:
+                        num_writes += 1
+                        combined = lidar_frame["compressed_metadata"] + lidar_frame["compressed_data"]
+                        b64 = base64.b64encode(combined).decode("ascii")
+                        record = {"frame": b64}
+                        ff.write(json.dumps(record) + "\n")
+                        # ff.write(f"data: {lidar_frame['data']}\n")
+                        # ff.write(f"decoded_data: {json.dump(lidar_frame['decoded_data'], ff, default=lambda o: o.tolist() if hasattr(o, 'tolist') else str(o))}\n") 
+                        # ff.write(f"compressed_data: {lidar_frame['compressed_data']}\n\n\n")
 
-            # New robot data hook
-            async def on_robot_data(robot_data):
-                # logger.debug("on robot data")
-                try:
-                    if robot_data and robot_data.odometry_data:
-                        odom = robot_data.odometry_data
-                        vmv_viewer.submit_robot_pose(
-                            position=odom.position,         # {"x":..,"y":..,"z":..}
-                            orientation=odom.orientation,   # {"x":..,"y":..,"z":..,"w":..}
-                        )
-                except Exception as e:
-                    logger.warning(f"robot pose update failed: {e}")
 
-            asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
-        finally:
-            vmv_viewer.close()
+                # New robot data hook
+                async def on_robot_data(robot_data):
+                    # logger.debug("on robot data")
+                    try:
+                        if robot_data and robot_data.odometry_data:
+                            odom = robot_data.odometry_data
+                            vmv_viewer.submit_robot_pose(
+                                position=odom.position,         # {"x":..,"y":..,"z":..}
+                                orientation=odom.orientation,   # {"x":..,"y":..,"z":..,"w":..}
+                            )
+                    except Exception as e:
+                        logger.warning(f"robot pose update failed: {e}")
+
+                asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
+            finally:
+                vmv_viewer.close()
     finally:
         if display_task is not None:
             display_task.cancel()
