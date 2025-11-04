@@ -104,6 +104,7 @@ class WebRTCDataDecoder:
                         'decoded_data': decoded_data,
                         'compressed_data': compressed_data,
                         'data': metadata,
+                        'compressed_metadata': buffer[:4 + json_length],
                         **metadata
                     }
                 except Exception as exception:
@@ -114,6 +115,7 @@ class WebRTCDataDecoder:
                 'decoded_data': None,
                 'compressed_data': compressed_data,
                 'data': metadata,
+                'compressed_metadata': buffer[:4 + json_length],
                 **metadata
             }
             

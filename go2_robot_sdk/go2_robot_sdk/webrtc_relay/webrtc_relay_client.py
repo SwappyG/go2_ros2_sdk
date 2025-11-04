@@ -8,7 +8,9 @@ import httpx
 import logging
 import argparse
 import typing as t
-
+import sys
+import json
+import base64
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import ConnectArgs
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import OfferArgs, OfferReply
@@ -29,8 +31,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
 
 class WebRTCRelayClient:
     def __init__(
@@ -268,6 +268,53 @@ class WebRTCRelayClient:
         await done
 
 
+async def keyboard_control_loop(client):
+    """Read single-line keyboard commands from stdin in a thread and send move commands.
+
+    Keys:
+      w -> up (forward)
+      s -> down (back)
+      a -> left (strafe left)
+      d -> right (strafe right)
+      q -> quit the control loop
+    """
+    print("Keyboard control: w(up), a(left), s(down), d(right), q(quit)")
+    try:
+        while True:
+            line = await asyncio.to_thread(sys.stdin.readline)
+            if not line:
+                await asyncio.sleep(0.1)
+                continue
+            key = line.strip().lower()
+            if not key:
+                continue
+            if key == "q":
+                print("command: quit")
+                break
+            if key == "w":
+                await client.move(0.5, 0.0, 0.0)
+                print("command: up")
+            elif key == "s":
+                await client.move(-0.5, 0.0, 0.0)
+                print("command: down")
+            elif key == "a":
+                await client.move(0.0, 0.5, 0.0)
+                print("command: left")
+            elif key == "d":
+                await client.move(0.0, -0.5, 0.0)
+                print("command: right")
+            elif key == "z":
+                await client.move(0.0, 0.0, 0.5)
+                print("command: rotate left")
+            elif key == "c":
+                await client.move(0.0, 0.0, -0.5)
+                print("command: rotate right")
+            else:
+                print(f"unknown command: {key}")
+    except asyncio.CancelledError:
+        return
+
+
 async def main(
     relay_url: str, 
     config: RobotConfig,
@@ -285,6 +332,16 @@ async def main(
         logger.info("created webrtc relay client, calling start")
         await client.start(True)
         logger.info("created webrtc relay client, started")
+
+        # start keyboard control loop
+        keyboard_task = asyncio.create_task(keyboard_control_loop(client))
+        try:
+            await keyboard_task
+        finally:
+            keyboard_task.cancel()
+            with contextlib.suppress(Exception):
+                await keyboard_task
+
         while True:
             await asyncio.sleep(5)
 
@@ -295,6 +352,7 @@ if __name__ == "__main__":
     p.add_argument("--robot-ip", default="192.168.12.1", help="GO2 AP IP (optional: call /connect first)")
     p.add_argument("--robot-num", type=int, default=0)
     p.add_argument("--token", default="")
+    p.add_argument("--dump-lidar", action="store_true", dest="dump_lidar", help="Write lidar frames to lidar_dump.txt")
     p.add_argument("--send-ping", action="store_true", help="Send a small bytes payload on datachannel open")
     p.add_argument("--disconnect-on-exit", default=True, action="store_true", help="Call /disconnect on exit")
     args = p.parse_args()
@@ -323,9 +381,12 @@ if __name__ == "__main__":
 
 
         vmv_viewer = vmv.VoxelMapViewer(flip_winding=False, compute_normals_every=1)
+        ff = open("lidar_dump.txt", mode="w+") if args.dump_lidar else None
+        num_writes = 0
         try:
             vmv_viewer.start()
             async def on_lidar_update(lidar_frame: dict[str, t.Any]):
+                global num_writes
                 dec = lidar_frame["decoded_data"]
                 meta = lidar_frame["data"]
                 positions = dec["positions"]           # np.uint8, length = face_count*12
@@ -336,6 +397,12 @@ if __name__ == "__main__":
                     resolution=float(meta["resolution"]),
                     origin_xyz=meta["origin"],
                 )
+                if ff and num_writes < 1000:
+                    num_writes += 1
+                    combined = lidar_frame["compressed_metadata"] + lidar_frame["compressed_data"]
+                    b64 = base64.b64encode(combined).decode("ascii")
+                    record = {"frame": b64}
+                    ff.write(json.dumps(record) + "\n")
 
             # New robot data hook
             async def on_robot_data(robot_data):
@@ -347,11 +414,15 @@ if __name__ == "__main__":
                             position=odom.position,         # {"x":..,"y":..,"z":..}
                             orientation=odom.orientation,   # {"x":..,"y":..,"z":..,"w":..}
                         )
+                        logger.info("Odom position: %s", json.dumps(odom.position))
+                        logger.info("Odom orientation: %s", json.dumps(odom.orientation))
                 except Exception as e:
                     logger.warning(f"robot pose update failed: {e}")
 
             asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
         finally:
+            if ff:
+                ff.close()
             vmv_viewer.close()
     finally:
         if display_task is not None:

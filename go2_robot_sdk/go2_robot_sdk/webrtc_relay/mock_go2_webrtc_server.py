@@ -8,8 +8,10 @@ from Crypto.Cipher import AES, PKCS1_v1_5
 import hashlib
 import json
 import logging
-import typing as t
+import typing as  t
 import uuid
+import base64
+import json
 
 from go2_robot_sdk.webrtc_relay.mock_go2_video_track import MockGo2VideoTrack
 from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
@@ -161,6 +163,8 @@ class MockGo2EncryptedServer:
         self.port = port
         self.publish_interval = 1.0 / publish_hz
 
+        self.lidar_frames = self._read_lidar_dump('lidar_dump.txt')
+
         # RSA keypair for the session
         self._rsa_key = RSA.generate(2048)
         self._rsa_pub_pem_bytes = self._rsa_key.publickey().export_key(format="PEM")
@@ -193,6 +197,32 @@ class MockGo2EncryptedServer:
         self._pending_validation: dict[RTCPeerConnection, str | None] = {}
 
         self._video_track = MockGo2VideoTrack()
+
+    def _read_lidar_dump(self, path: str) -> t.Dict[int, t.Dict[str, t.Any]]:
+        """
+        Read a JSONL lidar dump where each line is {"frame": "<base64>"}.
+        Returns a dict mapping line index -> {"b64": str, "raw": bytes}.
+        """
+        frames: t.Dict[int, t.Dict[str, t.Any]] = {}
+        with open(path, "r", encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    # skip invalid lines
+                    continue
+                b64 = obj.get("frame")
+                if not b64:
+                    continue
+                try:
+                    raw = base64.b64decode(b64)
+                except Exception:
+                    raw = b""  # keep empty on decode failure
+                frames[i] = raw
+        return frames
 
     # --------- HTTP Handlers ----------
     async def on_con_notify(self, request: web.Request) -> web.Response:
@@ -364,19 +394,31 @@ class MockGo2EncryptedServer:
 
         async def _pub():
             try:
+                lidar_frame_num = 0
+                lidar_frames_len = max(1, len(self.lidar_frames))
                 while True:
                     await asyncio.sleep(self.publish_interval)
                     if pc.connectionState != "connected":
+                        print("PC not connected")
                         continue
                     if not self._validated.get(pc):
+                        print("PC not validated")
                         continue
                     for topic in list(self._subscriptions.get(pc, set())):
                         maker = TOPICS.get(topic)
                         if not maker:
+                            print("Not a publisher")
                             continue
                         if topic == "rt/utlidar/voxel_map_compressed":
-                            # Do nothing for now, we don't know how to properly serialize lidar binary data
-                            pass   
+                            print("Publishing topic: " + topic)
+                            try:
+                                frame_bytes = self.lidar_frames[lidar_frame_num % lidar_frames_len]
+                                channel.send(frame_bytes)
+                            except Exception as e:
+                                logger.warning(f"failed to send lidar frame #{lidar_frame_num}: {e}")
+                            lidar_frame_num += 1
+                            # # Do nothing for now, we don't know how to properly serialize lidar binary data
+                            # pass
                         else:
                             msg = {"type": "msg", "topic": topic, "data": maker()}
                             try:
@@ -385,6 +427,8 @@ class MockGo2EncryptedServer:
                                 logger.warning(f"send failed: {e}")
             except asyncio.CancelledError:
                 pass
+            except Exception as ex:
+                logger.exception("publisher loop failed", exc_info=ex)
 
         self._pub_tasks[pc] = asyncio.create_task(_pub())
 
