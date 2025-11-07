@@ -12,7 +12,7 @@ import argparse
 def check_requirements():
     """Check if required packages are installed."""
     try:
-        import PyQt5
+        import PySide6
         import qasync
         import aiortc
         import open3d

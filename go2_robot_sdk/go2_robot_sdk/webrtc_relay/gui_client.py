@@ -7,14 +7,15 @@ import argparse
 import logging
 import typing as t
 import numpy as np
+import numpy.typing as npt
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QGridLayout, QGroupBox, QLabel, QLineEdit, QCheckBox,
+    QPushButton, QGridLayout, QGroupBox, QLabel, QLineEdit, QCheckBox,  # pyright: ignore[reportUnusedImport]
     QSplitter, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
-from PyQt5.QtGui import QKeyEvent
+from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtGui import QKeyEvent
 
 from qasync import QEventLoop, asyncSlot
 
@@ -36,11 +37,11 @@ logger = logging.getLogger(__name__)
 
 class RobotControlSignals(QObject):
     """Qt signals for thread-safe updates from async callbacks."""
-    video_frame_ready = pyqtSignal(np.ndarray)
-    lidar_update = pyqtSignal(np.ndarray, int, float, tuple)
-    odometry_update = pyqtSignal(dict, dict)
-    connection_status = pyqtSignal(bool)
-    status_message = pyqtSignal(str)
+    video_frame_ready = Signal(np.ndarray)
+    lidar_update = Signal(np.ndarray, int, float, tuple)
+    odometry_update = Signal(dict, dict)
+    connection_status = Signal(bool)
+    status_message = Signal(str)
 
 
 class ControlPanel(QWidget):
@@ -186,7 +187,7 @@ class GO2GuiClient(QMainWindow):
         self.client: WebRTCRelayClient | None = None
         self.signals = RobotControlSignals()
         self.video_track: MediaStreamTrack | None = None
-        self.video_task: asyncio.Task | None = None
+        self.video_task: asyncio.Task[None] | None = None
         
         # Movement state
         self.is_moving = False
@@ -201,7 +202,7 @@ class GO2GuiClient(QMainWindow):
         self.move_timer.setInterval(100)  # 10 Hz
         
         # Set focus policy to receive keyboard events
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -229,7 +230,7 @@ class GO2GuiClient(QMainWindow):
         main_layout.addWidget(self.status_widget)
         
         # Content area
-        content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Left panel: Video and Lidar
         left_panel = QWidget()
@@ -344,19 +345,19 @@ class GO2GuiClient(QMainWindow):
         """Handle keyboard input."""
         key = event.key()
         
-        if key == Qt.Key_W:
+        if key == Qt.Key.Key_W:
             self.set_velocity("forward", 0.5)
-        elif key == Qt.Key_S:
+        elif key == Qt.Key.Key_S:
             self.set_velocity("forward", -0.5)
-        elif key == Qt.Key_A:
+        elif key == Qt.Key.Key_A:
             self.set_velocity("strafe", 0.5)
-        elif key == Qt.Key_D:
+        elif key == Qt.Key.Key_D:
             self.set_velocity("strafe", -0.5)
-        elif key == Qt.Key_Z:
+        elif key == Qt.Key.Key_Z:
             self.set_velocity("rotation", 0.5)
-        elif key == Qt.Key_C:
+        elif key == Qt.Key.Key_C:
             self.set_velocity("rotation", -0.5)
-        elif key == Qt.Key_Space:
+        elif key == Qt.Key.Key_Space:
             self.stop_movement()
     
     def keyReleaseEvent(self, event: QKeyEvent):
@@ -366,11 +367,11 @@ class GO2GuiClient(QMainWindow):
         
         key = event.key()
         
-        if key in (Qt.Key_W, Qt.Key_S):
+        if key in (Qt.Key.Key_W, Qt.Key.Key_S):
             self.set_velocity("forward", 0.0)
-        elif key in (Qt.Key_A, Qt.Key_D):
+        elif key in (Qt.Key.Key_A, Qt.Key.Key_D):
             self.set_velocity("strafe", 0.0)
-        elif key in (Qt.Key_Z, Qt.Key_C):
+        elif key in (Qt.Key.Key_Z, Qt.Key.Key_C):
             self.set_velocity("rotation", 0.0)
     
     def set_velocity(self, direction: str, value: float):
@@ -490,7 +491,7 @@ class GO2GuiClient(QMainWindow):
     async def on_obstacle_avoid_changed(self, state: int):
         """Handle obstacle avoidance toggle."""
         if self.client:
-            enabled = state == Qt.Checked
+            enabled = state == Qt.CheckState.Checked
             await self.client.change_obstacle_avoid_state(enabled)
     
     async def handle_robot_data(self, robot_data: RobotData):
@@ -542,11 +543,11 @@ class GO2GuiClient(QMainWindow):
         except Exception as e:
             logger.warning(f"Failed to handle lidar frame: {e}")
     
-    def on_lidar_update(self, positions: np.ndarray, face_count: int, resolution: float, origin: tuple):
+    def on_lidar_update(self, positions: npt.NDArray[np.uint8], face_count: int, resolution: float, origin: tuple[float, float, float]):
         """Update lidar widget."""
         self.lidar_widget.update_lidar_data(positions, face_count, resolution, origin)
     
-    def on_odometry_update(self, position: dict, orientation: dict):
+    def on_odometry_update(self, position: dict[str, float], orientation: dict[str, float]):
         """Update odometry widget and lidar robot pose."""
         self.odometry_widget.update_odometry(position, orientation)
         self.lidar_widget.update_robot_pose(position, orientation)
@@ -562,7 +563,7 @@ class GO2GuiClient(QMainWindow):
             self.video_task.cancel()
         
         # Close VoxelMapViewer if active
-        if hasattr(self.lidar_widget, '_viewer_started') and self.lidar_widget._viewer_started:
+        if hasattr(self.lidar_widget, '_viewer_started') and self.lidar_widget._viewer_started:  # pyright: ignore[reportPrivateUsage]
             try:
                 self.lidar_widget.stop_voxel_viewer()
             except Exception as e:

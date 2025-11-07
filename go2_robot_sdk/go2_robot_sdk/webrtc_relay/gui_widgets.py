@@ -1,30 +1,31 @@
 """
 PyQt5 widgets for displaying robot data in the GUI.
 """
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QGridLayout, QGroupBox, QPushButton
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QFont
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QGridLayout, QGroupBox, QPushButton
+from PySide6.QtCore import Qt, Signal, QTimer  # pyright: ignore[reportUnusedImport]
+from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QFont  # pyright: ignore[reportUnusedImport]
 import numpy as np
+import numpy.typing as npt
 import cv2
-import typing as t
+import typing as t  # pyright: ignore[reportUnusedImport]
 import logging
 
 try:
     from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-    import vtkmodules.vtkRenderingOpenGL2
-    from vtkmodules.vtkCommonCore import vtkPoints, vtkUnsignedCharArray
+    import vtkmodules.vtkRenderingOpenGL2  # pyright: ignore[reportUnusedImport]
+    from vtkmodules.vtkCommonCore import vtkPoints, vtkUnsignedCharArray  # pyright: ignore[reportUnusedImport]
     from vtkmodules.vtkCommonDataModel import vtkPolyData, vtkCellArray
     from vtkmodules.vtkRenderingCore import (
-        vtkActor, vtkPolyDataMapper, vtkRenderer, vtkRenderWindow,
-        vtkProperty, vtkCamera
+        vtkActor, vtkPolyDataMapper, vtkRenderer, vtkRenderWindow,  # pyright: ignore[reportUnusedImport]
+        vtkProperty, vtkCamera  # pyright: ignore[reportUnusedImport]
     )
-    from vtkmodules.vtkFiltersCore import vtkTriangleFilter
+    from vtkmodules.vtkFiltersCore import vtkTriangleFilter  # pyright: ignore[reportUnusedImport]
     from vtkmodules.vtkCommonTransforms import vtkTransform
     from vtkmodules.vtkFiltersSources import vtkCubeSource
     from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
     VTK_AVAILABLE = True
 except ImportError:
-    VTK_AVAILABLE = False
+    VTK_AVAILABLE = False  # pyright: ignore[reportConstantRedefinition]
     print("Warning: VTK not available. Install with: pip install vtk")
 
 from go2_robot_sdk.webrtc_relay.voxel_map_viewer import VoxelMapViewer
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 if VTK_AVAILABLE:
+    # TODO: this should be moved to a different file so type hinting is cleaner, but not urgent
     class CustomInteractorStyle(vtkInteractorStyleTrackballCamera):
         """Custom VTK interactor style for pan and rotate controls.
         
@@ -139,7 +141,7 @@ class VideoWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.label = QLabel("Waiting for video...")
-        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setMinimumSize(640, 480)
         self.label.setStyleSheet("QLabel { background-color: #1e1e1e; color: white; }")
         
@@ -147,7 +149,7 @@ class VideoWidget(QWidget):
         layout.addWidget(self.label)
         self.setLayout(layout)
     
-    def update_frame(self, frame: np.ndarray):
+    def update_frame(self, frame: npt.NDArray[np.uint8]):
         """Update the video display with a new frame."""
         try:
             # Convert BGR to RGB
@@ -159,8 +161,8 @@ class VideoWidget(QWidget):
             # Scale to fit the label while maintaining aspect ratio
             scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
                 self.label.size(), 
-                Qt.KeepAspectRatio, 
-                Qt.SmoothTransformation
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
             )
             self.label.setPixmap(scaled_pixmap)
         except Exception as e:
@@ -218,7 +220,7 @@ class LidarWidget(QWidget):
             # Info label for 3D viewer
             self.viewer_info_label = QLabel("Click button above to open interactive 3D lidar viewer")
             self.viewer_info_label.setStyleSheet("QLabel { color: #aaa; padding: 10px; }")
-            self.viewer_info_label.setAlignment(Qt.AlignCenter)
+            self.viewer_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.viewer_info_label.setWordWrap(True)
             layout.addWidget(self.viewer_info_label)
         
@@ -229,7 +231,7 @@ class LidarWidget(QWidget):
         else:
             # Canvas for 2D/3D visualization
             self.canvas_label = QLabel()
-            self.canvas_label.setAlignment(Qt.AlignCenter)
+            self.canvas_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.canvas_label.setStyleSheet("QLabel { background-color: #1a1a1a; }")
             self.canvas_label.setMinimumSize(400, 400)
             self.canvas_label.setMouseTracking(True)
