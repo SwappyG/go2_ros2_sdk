@@ -21,7 +21,15 @@ dependencies = [
     "fastapi[standard] >= 0.119, < 1",
     "opencv-python >=4.11, < 5",
     "httpx >= 0.28, < 1",
-]   
+    "qasync",
+    "vtk"
+]
+
+[project.optional-dependencies]
+# install GUI extras when you actually need the PyQt5 GUI (or on supported platforms)
+gui = [
+    "PyQt5 >=5.15.9, <6",
+]
 
 # [tool.poetry.dependencies]
 # aioice = { source = "../my_local_package", develop = true }
