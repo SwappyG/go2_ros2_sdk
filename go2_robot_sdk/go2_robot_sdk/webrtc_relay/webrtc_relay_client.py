@@ -152,6 +152,28 @@ class WebRTCRelayClient:
             topic=RTC_TOPIC['SPORT_MOD'],
         ))
 
+    async def recovery_stand(self):
+        """Recovery stand - robot stands up from any position"""
+        if self._peer_datachannel is None:
+            raise StateException("call start before calling moving")
+    
+        self._peer_datachannel.send(command_generator.gen_command(
+            cmd=ROBOT_CMD['RecoveryStand'],
+            parameters=None,
+            topic=RTC_TOPIC['SPORT_MOD'],
+        ))
+
+    async def hello(self):
+        """Robot waves one of its front legs"""
+        if self._peer_datachannel is None:
+            raise StateException("call start before calling moving")
+    
+        self._peer_datachannel.send(command_generator.gen_command(
+            cmd=ROBOT_CMD['Hello'],
+            parameters=None,
+            topic=RTC_TOPIC['SPORT_MOD'],
+        ))
+
     async def _connect_to_go2(self):
         logger.info(f"instructing webrtc relay server to connect to the go2 at {self.robot_config=}")
         r = await self.client.post(f"{self.url}/go2/connect", json=ConnectArgs(

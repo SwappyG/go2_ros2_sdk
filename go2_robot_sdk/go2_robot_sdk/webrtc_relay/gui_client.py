@@ -114,10 +114,11 @@ class ControlPanel(QWidget):
         posture_layout = QVBoxLayout()
         
         self.btn_stand_up = QPushButton("Stand Up")
+        self.btn_recovery_stand = QPushButton("Recovery Stand")
         self.btn_sit = QPushButton("Sit Down")
         self.btn_lie_down = QPushButton("Lie Down")
         
-        for btn in [self.btn_stand_up, self.btn_sit, self.btn_lie_down]:
+        for btn in [self.btn_stand_up, self.btn_recovery_stand, self.btn_sit, self.btn_lie_down]:
             btn.setStyleSheet(button_style)
             btn.setMinimumHeight(30)
             btn.setMaximumHeight(40)
@@ -125,6 +126,20 @@ class ControlPanel(QWidget):
         
         posture_group.setLayout(posture_layout)
         layout.addWidget(posture_group)
+        
+        # Fun commands
+        fun_group = QGroupBox("Fun Commands")
+        fun_layout = QVBoxLayout()
+        
+        self.btn_hello = QPushButton("👋 Wave Hello")
+        
+        self.btn_hello.setStyleSheet(button_style)
+        self.btn_hello.setMinimumHeight(30)
+        self.btn_hello.setMaximumHeight(40)
+        fun_layout.addWidget(self.btn_hello)
+        
+        fun_group.setLayout(fun_layout)
+        layout.addWidget(fun_group)
         
         # Obstacle avoidance
         avoid_group = QGroupBox("Settings")
@@ -157,6 +172,7 @@ class ControlPanel(QWidget):
         """
         movement_group.setStyleSheet(group_style)
         posture_group.setStyleSheet(group_style)
+        fun_group.setStyleSheet(group_style)
         avoid_group.setStyleSheet(group_style)
 
 
@@ -190,7 +206,7 @@ class GO2GuiClient(QMainWindow):
     def init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("GO2 Robot Control Center")
-        self.setGeometry(100, 100, 1320, 800)
+        self.setGeometry(100, 100, 1320, 900)
         self.setMinimumSize(800, 600)
         
         # Apply dark theme
@@ -303,8 +319,12 @@ class GO2GuiClient(QMainWindow):
         
         # Posture buttons
         self.control_panel.btn_stand_up.clicked.connect(self.on_stand_up)
+        self.control_panel.btn_recovery_stand.clicked.connect(self.on_recovery_stand)
         self.control_panel.btn_sit.clicked.connect(self.on_sit)
         self.control_panel.btn_lie_down.clicked.connect(self.on_lie_down)
+        
+        # Fun commands
+        self.control_panel.btn_hello.clicked.connect(self.on_hello)
         
         # Obstacle avoidance
         self.control_panel.chk_obstacle_avoid.stateChanged.connect(self.on_obstacle_avoid_changed)
@@ -443,6 +463,12 @@ class GO2GuiClient(QMainWindow):
             await self.client.stand_up()
     
     @asyncSlot()
+    async def on_recovery_stand(self):
+        """Command robot to recovery stand."""
+        if self.client:
+            await self.client.recovery_stand()
+    
+    @asyncSlot()
     async def on_sit(self):
         """Command robot to sit."""
         if self.client:
@@ -453,6 +479,12 @@ class GO2GuiClient(QMainWindow):
         """Command robot to lie down."""
         if self.client:
             await self.client.lie_down_on_belly()
+    
+    @asyncSlot()
+    async def on_hello(self):
+        """Command robot to wave hello."""
+        if self.client:
+            await self.client.hello()
     
     @asyncSlot()
     async def on_obstacle_avoid_changed(self, state: int):
