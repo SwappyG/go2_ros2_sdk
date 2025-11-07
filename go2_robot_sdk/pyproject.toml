@@ -5,7 +5,7 @@ description = "establish connection to unitree go2 and expose data over webrtc a
 authors = []
 license = {text = "BSD-3-Clause"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "aioice @ git+https://github.com/legion1581/aioice.git@go2",
     "numpy >=1.26, < 2",
@@ -21,6 +21,7 @@ dependencies = [
     "fastapi[standard] >= 0.119, < 1",
     "opencv-python >=4.11, < 5",
     "httpx >= 0.28, < 1",
+    "PySide6 >= 6.10"
 ]   
 
 # [tool.poetry.dependencies]
