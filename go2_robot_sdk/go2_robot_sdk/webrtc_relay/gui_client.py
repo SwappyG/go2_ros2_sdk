@@ -12,12 +12,11 @@ import numpy.typing as npt
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QGridLayout, QGroupBox, QLabel, QLineEdit, QCheckBox,  # pyright: ignore[reportUnusedImport]
-    QSplitter, QMessageBox
+    QSplitter
 )
+from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QKeyEvent
-
-from qasync import QEventLoop, asyncSlot
 
 from aiortc import MediaStreamTrack  # type: ignore
 
@@ -180,14 +179,15 @@ class ControlPanel(QWidget):
 class GO2GuiClient(QMainWindow):
     """Main GUI window for GO2 robot control."""
     
-    def __init__(self, relay_url: str, robot_config: RobotConfig):
+    def __init__(self, relay_url: str):
         super().__init__()
         self.relay_url = relay_url
-        self.robot_config = robot_config
-        self.client: WebRTCRelayClient | None = None
+        # self.robot_config = robot_config
+        # self.client: WebRTCRelayClient | None = None
         self.signals = RobotControlSignals()
         self.video_track: MediaStreamTrack | None = None
         self.video_task: asyncio.Task[None] | None = None
+        self.invoker = GuiInvoker.make_invoker_on_gui_thread()
         
         # Movement state
         self.is_moving = False
@@ -203,6 +203,13 @@ class GO2GuiClient(QMainWindow):
         
         # Set focus policy to receive keyboard events
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        # Buffer for latest lidar frame and low-rate update timer (0.2 Hz)
+        self._latest_lidar_frame: t.Optional[dict[str, t.Any]] = None
+        self._lidar_update_timer = QTimer()
+        self._lidar_update_timer.timeout.connect(self._process_latest_lidar_frame)
+        self._lidar_update_timer.setInterval(5000)  # 5000 ms = 0.2 Hz
+        self._lidar_update_timer.start()
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -238,7 +245,7 @@ class GO2GuiClient(QMainWindow):
         
         self.video_widget = VideoWidget()
         # Use VTK for embedded 3D visualization (fallback to Open3D button if VTK not available)
-        self.lidar_widget = LidarWidget(use_voxel_viewer=True, use_vtk=True)
+        self.lidar_widget = LidarWidget(use_voxel_viewer=False, use_vtk=True)
         
         left_layout.addWidget(self.video_widget, stretch=2)
         left_layout.addWidget(self.lidar_widget, stretch=1)
@@ -294,6 +301,10 @@ class GO2GuiClient(QMainWindow):
         main_layout.addLayout(connection_layout)
         
         central_widget.setLayout(main_layout)
+
+    def add_client(self, client: WebRTCRelayClient):
+        """Add WebRTCRelayClient to the GUI client."""
+        self.client = client
     
     def connect_signals(self):
         """Connect Qt signals to slots."""
@@ -323,9 +334,6 @@ class GO2GuiClient(QMainWindow):
         self.control_panel.btn_recovery_stand.clicked.connect(self.on_recovery_stand)
         self.control_panel.btn_sit.clicked.connect(self.on_sit)
         self.control_panel.btn_lie_down.clicked.connect(self.on_lie_down)
-        
-        # Fun commands
-        self.control_panel.btn_hello.clicked.connect(self.on_hello)
         
         # Obstacle avoidance
         self.control_panel.chk_obstacle_avoid.stateChanged.connect(self.on_obstacle_avoid_changed)
@@ -379,7 +387,7 @@ class GO2GuiClient(QMainWindow):
         self.current_velocities[direction] = value
         
         # Send command immediately
-        asyncio.create_task(self._send_move_command())
+        self._send_move_command()
         
         # Start/update movement timer if any velocity is non-zero
         if any(v != 0.0 for v in self.current_velocities.values()):
@@ -392,62 +400,82 @@ class GO2GuiClient(QMainWindow):
         """Stop all movement."""
         self.current_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
         self.move_timer.stop()
-        asyncio.create_task(self._send_move_command())
+        self._send_move_command()
     
     def send_movement_command(self):
         """Send current movement command (called by timer)."""
-        asyncio.create_task(self._send_move_command())
+        self._send_move_command()
     
-    async def _send_move_command(self):
+    def _send_move_command(self):
         """Async helper to send move command."""
         if self.client:
             try:
-                await self.client.move(
-                    forward_velocity=self.current_velocities["forward"],
-                    strafe_velocity=self.current_velocities["strafe"],
-                    rotation_velocity=self.current_velocities["rotation"]
+                # print("Sending move command")
+                # loop = asyncio.get_event_loop()
+
+                # # pass
+                # loop.call_soon_threadsafe(
+                #     self.client.move,
+                #     self.current_velocities["forward"],
+                #     self.current_velocities["strafe"],
+                #     self.current_velocities["rotation"]
+                # )
+                logger.debug("Sending move command")
+                # Use the event loop that the client is running on (set in client_main)
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send move command")
+                    return
+
+                # Schedule the client's async move() coroutine on the client's event loop
+                asyncio.run_coroutine_threadsafe(
+                    self.client.move(
+                        self.current_velocities["forward"],
+                        self.current_velocities["strafe"],
+                        self.current_velocities["rotation"]
+                    ),
+                    loop
                 )
             except Exception as e:
                 logger.warning(f"Failed to send move command: {e}")
+
+    def on_connect(self):
+        pass
+    #     """Connect to the robot."""
+    #     try:
+    #         self.signals.status_message.emit("Connecting...")
+    #         self.btn_connect.setEnabled(False)
+            
+    #         self.client = WebRTCRelayClient(
+    #             relay_url=self.relay_url,
+    #             robot_config=self.robot_config,
+    #             on_robot_data=self.handle_robot_data,
+    #             on_video_track=self.handle_video_track,
+    #             on_lidar_frame=self.handle_lidar_frame
+    #         )
+            
+    #         await self.client.start(connect_go2=True)
+            
+    #         self.signals.connection_status.emit(True)
+    #         self.signals.status_message.emit("Connected to robot")
+    #         self.btn_disconnect.setEnabled(True)
+            
+    #     except Exception as e:
+    #         logger.error(f"Connection failed: {e}")
+    #         self.signals.status_message.emit(f"Connection failed: {e}")
+    #         self.btn_connect.setEnabled(True)
+    #         QMessageBox.critical(self, "Connection Error", f"Failed to connect: {e}")
     
-    @asyncSlot()
-    async def on_connect(self):
-        """Connect to the robot."""
-        try:
-            self.signals.status_message.emit("Connecting...")
-            self.btn_connect.setEnabled(False)
-            
-            self.client = WebRTCRelayClient(
-                relay_url=self.relay_url,
-                robot_config=self.robot_config,
-                on_robot_data=self.handle_robot_data,
-                on_video_track=self.handle_video_track,
-                on_lidar_frame=self.handle_lidar_frame
-            )
-            
-            await self.client.start(connect_go2=True)
-            
-            self.signals.connection_status.emit(True)
-            self.signals.status_message.emit("Connected to robot")
-            self.btn_disconnect.setEnabled(True)
-            
-        except Exception as e:
-            logger.error(f"Connection failed: {e}")
-            self.signals.status_message.emit(f"Connection failed: {e}")
-            self.btn_connect.setEnabled(True)
-            QMessageBox.critical(self, "Connection Error", f"Failed to connect: {e}")
-    
-    @asyncSlot()
-    async def on_disconnect(self):
+    def on_disconnect(self):
         """Disconnect from the robot."""
         try:
             if self.video_task:
                 self.video_task.cancel()
                 self.video_task = None
             
-            if self.client:
-                await self.client.shutdown()
-                self.client = None
+            # if self.client:
+            #     await self.client.shutdown()
+            #     self.client = None
             
             self.signals.connection_status.emit(False)
             self.signals.status_message.emit("Disconnected")
@@ -457,44 +485,39 @@ class GO2GuiClient(QMainWindow):
         except Exception as e:
             logger.error(f"Disconnect failed: {e}")
     
-    @asyncSlot()
-    async def on_stand_up(self):
+    def on_stand_up(self):
         """Command robot to stand up."""
-        if self.client:
-            await self.client.stand_up()
+        pass
+        # if self.client:
+        #     await self.client.stand_up()
     
-    @asyncSlot()
-    async def on_recovery_stand(self):
+    def on_recovery_stand(self):
         """Command robot to recovery stand."""
-        if self.client:
-            await self.client.recovery_stand()
+        # if self.client:
+        #     await self.client.recovery_stand()
     
-    @asyncSlot()
-    async def on_sit(self):
+    def on_sit(self):
         """Command robot to sit."""
-        if self.client:
-            await self.client.sit_on_hind_legs()
+        # if self.client:
+        #     await self.client.sit_on_hind_legs()
     
-    @asyncSlot()
-    async def on_lie_down(self):
+    def on_lie_down(self):
         """Command robot to lie down."""
-        if self.client:
-            await self.client.lie_down_on_belly()
+        # if self.client:
+        #     await self.client.lie_down_on_belly()
     
-    @asyncSlot()
-    async def on_hello(self):
-        """Command robot to wave hello."""
-        if self.client:
-            await self.client.hello()
+    # def on_hello(self):
+        # """Command robot to wave hello."""
+        # if self.client:
+        #     await self.client.hello()
     
-    @asyncSlot()
-    async def on_obstacle_avoid_changed(self, state: int):
+    def on_obstacle_avoid_changed(self, state: int):
         """Handle obstacle avoidance toggle."""
-        if self.client:
-            enabled = state == Qt.CheckState.Checked
-            await self.client.change_obstacle_avoid_state(enabled)
+        # if self.client:
+        #     enabled = state == Qt.CheckState.Checked
+        #     await self.client.change_obstacle_avoid_state(enabled)
     
-    async def handle_robot_data(self, robot_data: RobotData):
+    def handle_robot_data(self, robot_data: RobotData):
         """Handle robot data updates."""
         try:
             if robot_data and robot_data.odometry_data:
@@ -505,30 +528,19 @@ class GO2GuiClient(QMainWindow):
         except Exception as e:
             logger.warning(f"Failed to handle robot data: {e}")
     
-    async def handle_video_track(self, track: MediaStreamTrack):
+    def handle_video_track(self, frame):
         """Handle new video track."""
-        logger.info(f"Received video track: {track}")
-        
-        # Cancel previous video task if any
-        if self.video_task:
-            self.video_task.cancel()
-        
-        self.video_track = track
-        self.video_task = asyncio.create_task(self._process_video_stream())
-    
-    async def _process_video_stream(self):
-        """Process video frames from the track."""
+        logger.info(f"Received video track")
+
         try:
-            while self.video_track:
-                frame = await self.video_track.recv()
-                img = frame.to_ndarray(format="bgr24")  # pyright: ignore[reportAttributeAccessIssue]
-                self.signals.video_frame_ready.emit(img)
+            img = frame.to_ndarray(format="bgr24")  # pyright: ignore[reportAttributeAccessIssue]
+            self.signals.video_frame_ready.emit(img)
         except asyncio.CancelledError:
             logger.info("Video stream processing cancelled")
         except Exception as e:
             logger.warning(f"Video stream error: {e}")
     
-    async def handle_lidar_frame(self, lidar_frame: dict[str, t.Any]):
+    def handle_lidar_frame(self, lidar_frame: dict[str, t.Any]):
         """Handle lidar data updates."""
         try:
             dec = lidar_frame["decoded_data"]
@@ -547,6 +559,23 @@ class GO2GuiClient(QMainWindow):
         """Update lidar widget."""
         self.lidar_widget.update_lidar_data(positions, face_count, resolution, origin)
     
+    def update_latest_lidar_frame(self, lidar_frame: dict[str, t.Any]) -> None:
+        """Store the most recent lidar frame (called on GUI thread)."""
+        self._latest_lidar_frame = lidar_frame
+
+    def _process_latest_lidar_frame(self) -> None:
+        """Called by QTimer at 0.2 Hz to process the latest lidar frame if any."""
+        if self._latest_lidar_frame is None:
+            return
+        try:
+            # reuse existing handler to decode & emit signals
+            self.handle_lidar_frame(self._latest_lidar_frame)
+        except Exception as e:
+            logger.warning(f"Failed to process latest lidar frame: {e}")
+        finally:
+            # clear buffer so we only process new incoming frames next tick
+            self._latest_lidar_frame = None
+
     def on_odometry_update(self, position: dict[str, float], orientation: dict[str, float]):
         """Update odometry widget and lidar robot pose."""
         self.odometry_widget.update_odometry(position, orientation)
@@ -570,26 +599,58 @@ class GO2GuiClient(QMainWindow):
                 logger.warning(f"Error closing VoxelMapViewer: {e}")
         
         # Disconnect client synchronously
-        if self.client:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(self._cleanup_and_close())
-                event.ignore()  # Delay close until cleanup is done
-                QTimer.singleShot(500, self.close)  # Force close after 500ms
-            else:
-                event.accept()
-        else:
-            event.accept()
+        # if self.client:
+        #     loop = asyncio.get_event_loop()
+        #     if loop.is_running():
+        #         loop.create_task(self._cleanup_and_close())
+        #         event.ignore()  # Delay close until cleanup is done
+        #         QTimer.singleShot(500, self.close)  # Force close after 500ms
+        #     else:
+        #         event.accept()
+        # else:
+        #     event.accept()
     
-    async def _cleanup_and_close(self):
-        """Async cleanup before close."""
-        try:
-            if self.client:
-                await self.client.shutdown()
-                self.client = None
-        except Exception as e:
-            logger.warning(f"Error during cleanup: {e}")
+    # def _cleanup_and_close(self):
+    #     """Async cleanup before close."""
+    #     try:
+    #         if self.client:
+    #             await self.client.shutdown()
+    #             self.client = None
+    #     except Exception as e:
+    #         logger.warning(f"Error during cleanup: {e}")
 
+class GuiInvoker(QtCore.QObject):
+    """Helper to run functions that originate from threads back onto main GUI thread"""
+
+    call = QtCore.Signal(object)  # emits a Python callable
+
+    @QtCore.Slot(object)  # type: ignore[reportCallIssue]
+    def _run(self, fn: t.Callable[[], None]) -> None:
+        fn()
+
+    @classmethod
+    def make_invoker_on_gui_thread(cls) -> 'GuiInvoker':
+        """factory function for making this class"""
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            raise RuntimeError("No QApplication running")
+        inv = GuiInvoker()
+        inv.moveToThread(app.thread())  # ensure GUI-thread affinity
+        inv.call.connect(  # type: ignore[reportAttributeAccessIssue]
+            inv._run, QtCore.Qt.ConnectionType.QueuedConnection
+        )
+        return inv
+    
+async def client_main(api, config, client, on_robot_data, on_video_track, on_lidar_frame):
+    """Main client logic."""
+    try:
+        client._loop = asyncio.get_running_loop()
+        await client.start(connect_go2=True)
+        while True:
+            await asyncio.sleep(1)
+    except Exception as e:
+        await client.shutdown()
+        logger.error(f"Error in client main: {e}")
 
 def main():
     """Main entry point."""
@@ -599,6 +660,17 @@ def main():
     parser.add_argument("--token", default="", help="Robot authentication token")
     args = parser.parse_args()
     
+
+    # Create Qt application with async event loop
+    app = QApplication(sys.argv)
+    window = GO2GuiClient(relay_url=args.api)
+    invoker = GuiInvoker.make_invoker_on_gui_thread()
+
+    async def on_robot_data(robot_data: RobotData):
+        def _helper():
+            window.handle_robot_data(robot_data)
+        invoker.call.emit(_helper)
+
     # Create robot config
     config = RobotConfig(
         robot_ip_list=[args.robot_ip],
@@ -610,35 +682,93 @@ def main():
         obstacle_avoidance=True,
         conn_mode='single'
     )
+
+    video_task = None
+    async def on_video_track(track: MediaStreamTrack):
+        nonlocal video_task
+        def _helper(frame):
+            window.handle_video_track(frame)
+
+        async def _video_task_runner():
+            while True:
+                frame = await track.recv()
+                invoker.call.emit(lambda: _helper(frame))
     
-    # Create Qt application with async event loop
-    app = QApplication(sys.argv)
-    
+        video_task = asyncio.create_task(_video_task_runner())
+
+    # lidar_task = None
+    async def on_lidar_frame(lidar_frame: dict[str, t.Any]):
+        # nonlocal lidar_task
+        # def _helper():
+        #     window.update_latest_lidar_frame(lidar_frame)
+
+        # async def _lidar_task_runner():
+        #     while True:
+        #         invoker.call.emit(_helper)
+
+        # lidar_task = asyncio.create_task(_lidar_task_runner())
+        def _helper():
+            window.update_latest_lidar_frame(lidar_frame)
+        invoker.call.emit(_helper)
+        # pass
+
+    client = WebRTCRelayClient(
+        relay_url=args.api,
+        robot_config=config,
+        on_robot_data=on_robot_data,
+        on_video_track=on_video_track,
+        on_lidar_frame=on_lidar_frame,
+    )
+
+    window.add_client(client)
+
+    def client_thread():
+        try:
+            asyncio.run(
+                client_main(
+                    api=args.api, 
+                    config=config, 
+                    client=client,
+                    on_robot_data=on_robot_data, 
+                    on_video_track=on_video_track, 
+                    on_lidar_frame=on_lidar_frame
+                )
+            )
+        except Exception as e:
+            logger.error(f"Connection failed: {e}")
+
+    import threading
+    client_thread_handle = threading.Thread(target=client_thread)
+    client_thread_handle.start()
+        
+
     # Enable Ctrl+C handling
     import signal
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     
-    loop = QEventLoop(app)
-    asyncio.set_event_loop(loop)
+    # loop = QEventLoop(app)
+    # asyncio.set_event_loop(loop)
     
     # Create and show main window
-    window = GO2GuiClient(relay_url=args.api, robot_config=config)
     window.show()
     
     # Run event loop
     try:
-        with loop:
-            loop.run_forever()
+        sys.exit(app.exec_())
+        # with loop:
+            # loop.run_forever()
     except KeyboardInterrupt:
         print("\nKeyboard interrupt received, shutting down...")
     finally:
+        if video_task is not None:
+            video_task.cancel()
         # Ensure cleanup
-        if window.client:
-            try:
-                loop.run_until_complete(window.client.shutdown())
-            except:
-                pass
-        loop.close()
+        # if window.client:
+        #     try:
+        #         loop.run_until_complete(window.client.shutdown())
+        #     except:
+        #         pass
+        # loop.close()
 
 
 if __name__ == "__main__":

@@ -389,7 +389,22 @@ if __name__ == "__main__":
         obstacle_avoidance=True, 
         conn_mode='single'
     )
+
+    # async def on_video_track(track: MediaStreamTrack):
+    #     print(f"Video track received: {track}")
+
+    # async def on_robot_data(robot_data: RobotData):
+    #     print(f"Robot data received: {robot_data}")
+
     
+    # asyncio.run(main(
+    #     relay_url=args.api,
+    #     config=config,
+    #     on_robot_data=on_robot_data,
+    #     on_video_track=on_video_track,
+    #     on_lidar_update=on_lidar_update
+    # ))
+
     display_task: asyncio.Task[None] | None = None
     try:
         async def on_video_track(track: MediaStreamTrack):
@@ -401,51 +416,57 @@ if __name__ == "__main__":
 
             display_task = asyncio.create_task(display_video(track))        
 
+        async def on_lidar_update(lidar_frame: dict[str, t.Any]):
+            print(f"Lidar frame received with {lidar_frame.get('decoded_data', {}).get('face_count', 0)} faces")
 
-        vmv_viewer = vmv.VoxelMapViewer(flip_winding=False, compute_normals_every=1)
-        ff = open("lidar_dump.txt", mode="w+") if args.dump_lidar else None
-        num_writes = 0
-        try:
-            vmv_viewer.start()
-            async def on_lidar_update(lidar_frame: dict[str, t.Any]):
-                global num_writes
-                dec = lidar_frame["decoded_data"]
-                meta = lidar_frame["data"]
-                positions = dec["positions"]           # np.uint8, length = face_count*12
-                face_count = int(dec["face_count"])
-                vmv_viewer.submit_u8(
-                    positions_u8=positions,
-                    face_count=face_count,
-                    resolution=float(meta["resolution"]),
-                    origin_xyz=meta["origin"],
-                )
-                if ff and num_writes < 1000:
-                    num_writes += 1
-                    combined = lidar_frame["compressed_metadata"] + lidar_frame["compressed_data"]
-                    b64 = base64.b64encode(combined).decode("ascii")
-                    record = {"frame": b64}
-                    ff.write(json.dumps(record) + "\n")
+
+        # vmv_viewer = vmv.VoxelMapViewer(flip_winding=False, compute_normals_every=1)
+        # ff = open("lidar_dump.txt", mode="w+") if args.dump_lidar else None
+        # num_writes = 0
+        # try:
+        #     vmv_viewer.start()
+        #     async def on_lidar_update(lidar_frame: dict[str, t.Any]):
+        #         global num_writes
+        #         dec = lidar_frame["decoded_data"]
+        #         meta = lidar_frame["data"]
+        #         positions = dec["positions"]           # np.uint8, length = face_count*12
+        #         face_count = int(dec["face_count"])
+        #         vmv_viewer.submit_u8(
+        #             positions_u8=positions,
+        #             face_count=face_count,
+        #             resolution=float(meta["resolution"]),
+        #             origin_xyz=meta["origin"],
+        #         )
+        #         if ff and num_writes < 1000:
+        #             num_writes += 1
+        #             combined = lidar_frame["compressed_metadata"] + lidar_frame["compressed_data"]
+        #             b64 = base64.b64encode(combined).decode("ascii")
+        #             record = {"frame": b64}
+        #             ff.write(json.dumps(record) + "\n")
 
             # New robot data hook
-            async def on_robot_data(robot_data):
-                # logger.debug("on robot data")
-                try:
-                    if robot_data and robot_data.odometry_data:
-                        odom = robot_data.odometry_data
-                        vmv_viewer.submit_robot_pose(
-                            position=odom.position,         # {"x":..,"y":..,"z":..}
-                            orientation=odom.orientation,   # {"x":..,"y":..,"z":..,"w":..}
-                        )
-                        logger.info("Odom position: %s", json.dumps(odom.position))
-                        logger.info("Odom orientation: %s", json.dumps(odom.orientation))
-                except Exception as e:
-                    logger.warning(f"robot pose update failed: {e}")
+            # async def on_robot_data(robot_data):
+            #     # logger.debug("on robot data")
+            #     try:
+            #         if robot_data and robot_data.odometry_data:
+            #             odom = robot_data.odometry_data
+            #             # vmv_viewer.submit_robot_pose(
+            #             #     position=odom.position,         # {"x":..,"y":..,"z":..}
+            #             #     orientation=odom.orientation,   # {"x":..,"y":..,"z":..,"w":..}
+            #             # )
+            #             logger.info("Odom position: %s", json.dumps(odom.position))
+            #             logger.info("Odom orientation: %s", json.dumps(odom.orientation))
+            #     except Exception as e:
+            #         logger.warning(f"robot pose update failed: {e}")
 
-            asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
-        finally:
-            if ff:
-                ff.close()
-            vmv_viewer.close()
+        async def on_robot_data(robot_data: RobotData):
+            pass
+
+        asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
+        # finally:
+        #     if ff:
+        #         ff.close()
+        #     vmv_viewer.close()
     finally:
         if display_task is not None:
             display_task.cancel()
