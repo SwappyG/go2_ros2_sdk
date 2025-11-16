@@ -24,6 +24,7 @@ import go2_robot_sdk.webrtc_relay.voxel_map_viewer as vmv
 from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC 
 from go2_robot_sdk.domain.constants.robot_commands import ROBOT_CMD
 from go2_robot_sdk.application.utils import command_generator
+from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +51,7 @@ class WebRTCRelayClient:
         self._data_decoder = WebRTCDataDecoder(enable_lidar_decoding=True)
         self._peer_connection = None
         self._peer_datachannel = None
+        self._stats_monitor: WebRTCStatsMonitor | None = None
         
 
     async def __aenter__(self):
@@ -59,6 +61,11 @@ class WebRTCRelayClient:
         await self.shutdown()
 
     async def shutdown(self):
+        # Stop stats monitoring
+        if self._stats_monitor:
+            await self._stats_monitor.stop()
+            self._stats_monitor = None
+        
         with contextlib.suppress(Exception):
             await self.client.aclose() 
 
@@ -231,6 +238,13 @@ class WebRTCRelayClient:
         answer = OfferReply.model_validate(resp.json())
         logger.info(f"received answer from webrtc relay server. {answer=}. Connection established, waiting for data and video channels.")
         await peer.setRemoteDescription(RTCSessionDescription(sdp=answer.sdp, type=answer.type))
+        
+        # Start WebRTC stats monitoring for client→relay connection
+        import os
+        debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
+        self._stats_monitor = WebRTCStatsMonitor("CLIENT→RELAY", peer, debug=debug_stats)
+        await self._stats_monitor.start(interval_seconds=5.0)
+        
         return peer, peer_datachannel
           
     def _on_peer_datachannel_open(self, peer_connection_data_channel: RTCDataChannel):

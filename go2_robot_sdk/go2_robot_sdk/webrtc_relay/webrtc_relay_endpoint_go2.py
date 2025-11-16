@@ -11,6 +11,7 @@ from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 from go2_robot_sdk.infrastructure.webrtc.go2_connection import Go2Connection, RobotData
 from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import WebRTCRelayAppState, get_app_state 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
+from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,28 @@ async def connect(args: ConnectArgs, state: WebRTCRelayAppState = Depends(get_ap
         raise HTTPException(status_code=502, detail=f"GO2 connect failed: {e}")
 
     state.go2 = go2
+    
+    # Wait for WebRTC connection to be fully established before starting stats monitoring
+    # This ensures stats collection will have meaningful data
+    max_wait_time = 10.0  # Maximum wait time in seconds
+    wait_interval = 0.1   # Check every 100ms
+    waited = 0.0
+    while go2.pc.connectionState != "connected" and waited < max_wait_time:
+        await asyncio.sleep(wait_interval)
+        waited += wait_interval
+    
+    if go2.pc.connectionState != "connected":
+        logger.warning(f"GO2 connection state is {go2.pc.connectionState} after {waited:.1f}s, starting stats monitor anyway")
+    else:
+        logger.info(f"GO2 connection established (state: {go2.pc.connectionState}), starting stats monitor")
+    
+    # Start WebRTC stats monitoring for GO2→Relay connection
+    import os
+    debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
+    go2_stats_monitor = WebRTCStatsMonitor("GO2→RELAY", go2.pc, debug=debug_stats)
+    await go2_stats_monitor.start(interval_seconds=5.0)
+    state.go2_stats_monitor = go2_stats_monitor
+    
     return ConnectReply(robot_ip=args.robot_ip)
 
 
@@ -125,6 +148,11 @@ async def disconnect(_args: DisconnectArgs, state: WebRTCRelayAppState = Depends
     """
     Disconnect from GO2 and tear down any existing PC session.
     """
+    # Stop stats monitoring
+    if state.go2_stats_monitor:
+        await state.go2_stats_monitor.stop()
+        state.go2_stats_monitor = None
+    
     # Close PC side first
     if state.relay_rtc_peer_connection:
         await state.relay_rtc_peer_connection.close()

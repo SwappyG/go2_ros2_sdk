@@ -1,10 +1,10 @@
 import asyncio
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import typing as t # pyright: ignore[reportUnusedImport]
-from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import WebRTCRelayAppState
+from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import WebRTCRelayAppState, get_app_state
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import router as go2_router
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import router as webrtc_router
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
@@ -45,6 +45,23 @@ async def lifespan(fastapi_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(go2_router, prefix="/go2")
 app.include_router(webrtc_router, prefix="/webrtc")
+
+
+@app.get("/stats/webrtc")
+async def get_webrtc_stats(state: WebRTCRelayAppState = Depends(get_app_state)):
+    """Get current WebRTC statistics for all connections"""
+    stats = {}
+    
+    if state.relay_stats_monitor:
+        stats["relay_to_client"] = await state.relay_stats_monitor.get_current_stats()
+    
+    if state.client_to_relay_stats_monitor:
+        stats["client_to_relay"] = await state.client_to_relay_stats_monitor.get_current_stats()
+    
+    if state.go2_stats_monitor:
+        stats["go2_to_relay"] = await state.go2_stats_monitor.get_current_stats()
+    
+    return stats
 
 
 @app.exception_handler(StateException)

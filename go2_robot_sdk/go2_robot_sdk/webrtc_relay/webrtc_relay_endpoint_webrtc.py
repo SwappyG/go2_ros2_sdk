@@ -6,6 +6,7 @@ import typing as t
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import get_app_state, WebRTCRelayAppState
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
+from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -79,6 +80,20 @@ async def offer(
 
         # NOTE: in the newer aiortc versions, answer is always a type. But here in 1.9, it can be None
         await new_relay_peer_connection.setLocalDescription(answer)  # type: ignore
+
+        # Start WebRTC stats monitoring for relay→client connection
+        # This monitors RELAY→CLIENT (relay sending to client)
+        import os
+        debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
+        stats_monitor_relay_to_client = WebRTCStatsMonitor("RELAY→CLIENT", new_relay_peer_connection, debug=debug_stats)
+        await stats_monitor_relay_to_client.start(interval_seconds=5.0)
+        state.relay_stats_monitor = stats_monitor_relay_to_client
+        
+        # Also monitor CLIENT→RELAY (relay receiving from client)
+        # The relay's peer connection receives from client, so we can get RTT from remote-inbound-rtp
+        stats_monitor_client_to_relay = WebRTCStatsMonitor("CLIENT→RELAY", new_relay_peer_connection, debug=debug_stats)
+        await stats_monitor_client_to_relay.start(interval_seconds=5.0)
+        state.client_to_relay_stats_monitor = stats_monitor_client_to_relay
 
         # Re-trigger video to push fresh SPS/PPS for new subscriber
         try:
