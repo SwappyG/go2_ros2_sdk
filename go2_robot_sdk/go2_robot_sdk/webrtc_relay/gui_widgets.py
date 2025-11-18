@@ -142,12 +142,14 @@ class VideoWidget(QWidget):
         super().__init__(parent)
         self.label = QLabel("Waiting for video...")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.setMinimumSize(640, 480)
+        self.label.setMinimumSize(100, 100)
         self.label.setStyleSheet("QLabel { background-color: #1e1e1e; color: white; }")
         
         layout = QVBoxLayout()
         layout.addWidget(self.label)
         self.setLayout(layout)
+
+        logger.info(f"Label size: {self.label.size()}")
     
     def update_frame(self, frame: npt.NDArray[np.uint8]):
         """Update the video display with a new frame."""
@@ -158,13 +160,51 @@ class VideoWidget(QWidget):
             bytes_per_line = ch * w
             qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
             
-            # Scale to fit the label while maintaining aspect ratio
+            # # Scale to fit the label while maintaining aspect ratio
+            # scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
+            #     self.label.size(), 
+            #     Qt.AspectRatioMode.KeepAspectRatio, 
+            #     Qt.TransformationMode.SmoothTransformation
+            # )
+
+            # Get label size
+            label_size = self.label.size()
+            label_width = label_size.width()
+            label_height = label_size.height()
+
+            # Skip if label has invalid size
+            if label_width <= 0 or label_height <= 0:
+                return
+
+            # Calculate scale factor based on height to preserve full image height
+            height_scale = label_height / h
+            scaled_width = int(w * height_scale)
+            scaled_height = label_height
+
+            # Scale image to match calculated dimensions (full height, proportional width)
             scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
-                self.label.size(), 
-                Qt.AspectRatioMode.KeepAspectRatio, 
+                scaled_width,
+                scaled_height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,  # We've already calculated correct aspect ratio
                 Qt.TransformationMode.SmoothTransformation
             )
-            self.label.setPixmap(scaled_pixmap)
+
+            # Create a black background pixmap matching the label size
+            final_pixmap = QPixmap(label_width, label_height)
+            final_pixmap.fill(QColor(0, 0, 0))  # Black background
+
+            # Calculate centered position (horizontal centering, vertical is already full height)
+            scaled_width_actual = scaled_pixmap.width()
+            scaled_height_actual = scaled_pixmap.height()
+            x_offset = (label_width - scaled_width_actual) // 2
+            y_offset = (label_height - scaled_height_actual) // 2
+
+            # Draw the scaled image centered on the black background
+            painter = QPainter(final_pixmap)
+            painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
+            painter.end()
+
+            self.label.setPixmap(final_pixmap)
         except Exception as e:
             logger.warning(f"Failed to update video frame: {e}")
 
