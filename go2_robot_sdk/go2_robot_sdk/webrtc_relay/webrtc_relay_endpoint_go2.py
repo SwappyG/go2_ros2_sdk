@@ -12,6 +12,7 @@ from go2_robot_sdk.infrastructure.webrtc.go2_connection import Go2Connection, Ro
 from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import WebRTCRelayAppState, get_app_state 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
+from go2_robot_sdk.webrtc_relay.webrtc_relay_client_video_viewer import display_video
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,14 @@ async def _on_go2_video_track(state: WebRTCRelayAppState, track: MediaStreamTrac
     if state.go2_video_track is not None:
         state.go2_video_track.stop()
 
+    # async def on_video_track(track: MediaStreamTrack):
+    #     logger.info(f"got video track: {track}")
+    #     global display_task
+    #     if display_task is not None:
+    #         display_task.cancel()
+    #         await display_task
+
+    # state.display_task = asyncio.create_task(display_video(track))
     state.go2_video_track = track
 
 class ConnectArgs(BaseModel):

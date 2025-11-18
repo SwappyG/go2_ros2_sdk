@@ -27,6 +27,11 @@ async def lifespan(fastapi_app: FastAPI):
         yield
     finally:
         logger.info("cleaning up fastapi")
+        # if fastapi_app.state.state.display_task:
+        #     if fastapi_app.state.state.display_task.cancel():
+        #         await fastapi_app.state.state.display_task
+        #         fastapi_app.state.state.display_task = None
+
         if fastapi_app.state.state.go2:
             await fastapi_app.state.state.go2.disconnect()
 
