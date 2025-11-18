@@ -181,6 +181,17 @@ class WebRTCRelayClient:
             topic=RTC_TOPIC['SPORT_MOD'],
         ))
 
+    async def stop_move(self):
+        """Send STOPMOVE command to stop robot movement (api_id: 1003)"""
+        if self._peer_datachannel is None:
+            raise StateException("call start before calling stop_move")
+    
+        self._peer_datachannel.send(command_generator.gen_command(
+            cmd=1003,  # STOPMOVE command ID from raw_commands.md
+            parameters=None,
+            topic=RTC_TOPIC['SPORT_MOD'],
+        ))
+
     async def _connect_to_go2(self):
         logger.info(f"instructing webrtc relay server to connect to the go2 at {self.robot_config=}")
         r = await self.client.post(f"{self.url}/go2/connect", json=ConnectArgs(
