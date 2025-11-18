@@ -13,10 +13,10 @@ class GuiConfig:
     KEY_BINDINGS: Dict[str, Qt.Key] = {
         "forward": Qt.Key.Key_W,
         "backward": Qt.Key.Key_S,
-        "rotate_left": Qt.Key.Key_A,
-        "rotate_right": Qt.Key.Key_D,
-        "strafe_left": Qt.Key.Key_Q,
-        "strafe_right": Qt.Key.Key_E,
+        "rotate_left": Qt.Key.Key_Left,
+        "rotate_right": Qt.Key.Key_Right,
+        "strafe_left": Qt.Key.Key_A,
+        "strafe_right": Qt.Key.Key_D,
         "stop": Qt.Key.Key_Space,
         "quit": Qt.Key.Key_P,
     }

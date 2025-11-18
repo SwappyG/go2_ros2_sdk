@@ -146,9 +146,24 @@ class ControlPanel(QWidget):
         avoid_group = QGroupBox("Settings")
         avoid_layout = QVBoxLayout()
         
-        self.chk_obstacle_avoid = QCheckBox("Enable Obstacle Avoidance")
-        self.chk_obstacle_avoid.setStyleSheet("QCheckBox { color: white; padding: 5px; }")
-        avoid_layout.addWidget(self.chk_obstacle_avoid)
+        # Obstacle avoidance buttons
+        obstacle_avoid_layout = QHBoxLayout()
+        obstacle_avoid_layout.addWidget(QLabel("Obstacle Avoidance:"))
+        self.btn_enable_obstacle_avoid = QPushButton("Enable")
+        self.btn_enable_obstacle_avoid.setStyleSheet(button_style + """
+            QPushButton { background-color: #28a745; }
+            QPushButton:hover { background-color: #34ce57; }
+        """)
+        self.btn_enable_obstacle_avoid.setMinimumHeight(30)
+        self.btn_disable_obstacle_avoid = QPushButton("Disable")
+        self.btn_disable_obstacle_avoid.setStyleSheet(button_style + """
+            QPushButton { background-color: #dc3545; }
+            QPushButton:hover { background-color: #e4606d; }
+        """)
+        self.btn_disable_obstacle_avoid.setMinimumHeight(30)
+        obstacle_avoid_layout.addWidget(self.btn_enable_obstacle_avoid)
+        obstacle_avoid_layout.addWidget(self.btn_disable_obstacle_avoid)
+        avoid_layout.addLayout(obstacle_avoid_layout)
         
         # Linear velocity control (forward/backward/strafe)
         linear_velocity_layout = QHBoxLayout()
@@ -395,8 +410,9 @@ class GO2GuiClient(QMainWindow):
         # Fun commands
         self.control_panel.btn_balance_stand.clicked.connect(self.on_balance_stand)
         
-        # Obstacle avoidance
-        self.control_panel.chk_obstacle_avoid.stateChanged.connect(self.on_obstacle_avoid_changed)
+        # Obstacle avoidance buttons
+        self.control_panel.btn_enable_obstacle_avoid.clicked.connect(self.on_enable_obstacle_avoid)
+        self.control_panel.btn_disable_obstacle_avoid.clicked.connect(self.on_disable_obstacle_avoid)
         
         # Connection buttons
         self.btn_connect.clicked.connect(self.on_connect)
@@ -434,9 +450,17 @@ class GO2GuiClient(QMainWindow):
             self.set_target_velocity("strafe", -velocity_multiplier)
         elif action == "rotate_left":
             velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
+            # if self.target_velocities["forward"] >= 0:
+            #     velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
+            # else:
+            #     velocity_multiplier = -self.control_panel.rotation_velocity_spinbox.value()
             self.set_target_velocity("rotation", velocity_multiplier)
         elif action == "rotate_right":
             velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
+            # if self.target_velocities["forward"] >= 0:
+            #     velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
+            # else:
+            #     velocity_multiplier = -self.control_panel.rotation_velocity_spinbox.value()
             self.set_target_velocity("rotation", -velocity_multiplier)
         elif action == "stop":
             self.stop_movement()
@@ -595,12 +619,17 @@ class GO2GuiClient(QMainWindow):
                     logger.warning("Client event loop not available; cannot send move command")
                     return
 
+                if self.current_velocities["forward"] >= 0:
+                    rotation_velocity = self.current_velocities["rotation"]
+                else:
+                    rotation_velocity = -self.current_velocities["rotation"]
+
                 # Schedule the client's async move() coroutine on the client's event loop
                 asyncio.run_coroutine_threadsafe(
                     self.client.move(
                         self.current_velocities["forward"],
                         self.current_velocities["strafe"],
-                        self.current_velocities["rotation"]
+                        rotation_velocity
                     ),
                     loop
                 )
@@ -690,11 +719,39 @@ class GO2GuiClient(QMainWindow):
             except Exception as e:
                 logger.warning(f"Failed to send balance_stand command: {e}")
     
-    def on_obstacle_avoid_changed(self, state: int):
-        """Handle obstacle avoidance toggle."""
-        # if self.client:
-        #     enabled = state == Qt.CheckState.Checked
-        #     await self.client.change_obstacle_avoid_state(enabled)
+    def on_enable_obstacle_avoid(self):
+        """Enable obstacle avoidance."""
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot enable obstacle avoidance")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.change_obstacle_avoid_state(True),
+                    loop
+                )
+                logger.info("Enabled obstacle avoidance")
+            except Exception as e:
+                logger.warning(f"Failed to enable obstacle avoidance: {e}")
+    
+    def on_disable_obstacle_avoid(self):
+        """Disable obstacle avoidance."""
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot disable obstacle avoidance")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.change_obstacle_avoid_state(False),
+                    loop
+                )
+                logger.info("Disabled obstacle avoidance")
+            except Exception as e:
+                logger.warning(f"Failed to disable obstacle avoidance: {e}")
     
     def handle_robot_data(self, robot_data: RobotData):
         """Handle robot data updates."""
