@@ -73,4 +73,8 @@
 "{id: 0, topic: 'rt/api/obstacles_avoid/request', api_id: 1001, parameter: '{\"enable\": true}', priority: 0}"
 
 
+# BALANCE_STAND
+"{id: 0, topic: 'rt/api/sport/request', api_id: 1002, parameter: '', priority: 0}"
+
+
 make each one a function call. take the id, priority and any values in the parameter fields as args to functions. The topic and api_id are specific to each function. 

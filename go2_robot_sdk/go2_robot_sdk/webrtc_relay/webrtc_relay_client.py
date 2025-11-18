@@ -170,13 +170,13 @@ class WebRTCRelayClient:
             topic=RTC_TOPIC['SPORT_MOD'],
         ))
 
-    async def hello(self):
-        """Robot waves one of its front legs"""
+    async def balance_stand(self):
+        """Robot performs balance stand (api_id: 1002)"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling balance_stand")
     
         self._peer_datachannel.send(command_generator.gen_command(
-            cmd=ROBOT_CMD['Hello'],
+            cmd=1002,  # BALANCE_STAND command ID from raw_commands.md
             parameters=None,
             topic=RTC_TOPIC['SPORT_MOD'],
         ))

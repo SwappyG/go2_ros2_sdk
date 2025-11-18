@@ -132,12 +132,12 @@ class ControlPanel(QWidget):
         fun_group = QGroupBox("Fun Commands")
         fun_layout = QVBoxLayout()
         
-        self.btn_hello = QPushButton("👋 Wave Hello")
+        self.btn_balance_stand = QPushButton("⚖️ Balance Stand")
         
-        self.btn_hello.setStyleSheet(button_style)
-        self.btn_hello.setMinimumHeight(30)
-        self.btn_hello.setMaximumHeight(40)
-        fun_layout.addWidget(self.btn_hello)
+        self.btn_balance_stand.setStyleSheet(button_style)
+        self.btn_balance_stand.setMinimumHeight(30)
+        self.btn_balance_stand.setMaximumHeight(40)
+        fun_layout.addWidget(self.btn_balance_stand)
         
         fun_group.setLayout(fun_layout)
         layout.addWidget(fun_group)
@@ -391,6 +391,9 @@ class GO2GuiClient(QMainWindow):
         self.control_panel.btn_recovery_stand.clicked.connect(self.on_recovery_stand)
         self.control_panel.btn_sit.clicked.connect(self.on_sit)
         self.control_panel.btn_lie_down.clicked.connect(self.on_lie_down)
+        
+        # Fun commands
+        self.control_panel.btn_balance_stand.clicked.connect(self.on_balance_stand)
         
         # Obstacle avoidance
         self.control_panel.chk_obstacle_avoid.stateChanged.connect(self.on_obstacle_avoid_changed)
@@ -671,10 +674,21 @@ class GO2GuiClient(QMainWindow):
         # if self.client:
         #     await self.client.lie_down_on_belly()
     
-    # def on_hello(self):
-        # """Command robot to wave hello."""
-        # if self.client:
-        #     await self.client.hello()
+    def on_balance_stand(self):
+        """Command robot to perform balance stand."""
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send balance_stand command")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.balance_stand(),
+                    loop
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send balance_stand command: {e}")
     
     def on_obstacle_avoid_changed(self, state: int):
         """Handle obstacle avoidance toggle."""
@@ -695,7 +709,7 @@ class GO2GuiClient(QMainWindow):
     
     def handle_video_track(self, frame):
         """Handle new video track."""
-        logger.info(f"Received video track")
+        # logger.info(f"Received video track")
 
         try:
             img = frame.to_ndarray(format="bgr24")  # pyright: ignore[reportAttributeAccessIssue]
