@@ -1,3 +1,5 @@
+# This is a mock go2 webrtc server that reads from a webcam and sends the frames to the client.
+
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack  # type: ignore
 from aiortc.contrib.media import MediaBlackhole
