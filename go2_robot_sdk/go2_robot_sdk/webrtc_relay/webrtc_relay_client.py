@@ -149,12 +149,12 @@ class WebRTCRelayClient:
         ))
 
     async def stand_up_from(self):
-        """robot sits down on hind legs (like a real dog would)"""
+        """robot stands up from sitting position (gets up from SIT command)"""
         if self._peer_datachannel is None:
             raise StateException("call start before calling moving")
     
         self._peer_datachannel.send(command_generator.gen_command(
-            cmd=ROBOT_CMD['Sit'],
+            cmd=ROBOT_CMD['RiseSit'],
             parameters=None,
             topic=RTC_TOPIC['SPORT_MOD'],
         ))
