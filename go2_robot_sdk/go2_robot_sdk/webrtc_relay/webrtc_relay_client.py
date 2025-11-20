@@ -263,7 +263,13 @@ class WebRTCRelayClient:
         except Exception as e:
             logger.info("[client] /disconnect failed:", e)
 
-    async def _create_peer_connection(self) -> tuple[RTCPeerConnection, RTCDataChannel]:
+    async def _create_peer_connection(
+        self,
+        receive_video: bool = True,
+        receive_lidar: bool = True,
+        receive_robot_data: bool = True,
+        subscribed_topics: list[str] = None
+    ) -> tuple[RTCPeerConnection, RTCDataChannel]:
         logger.info(f"establishing WebRTC connection to webrtc relay server")
         peer = RTCPeerConnection(configuration=RTCConfiguration(iceServers=[]))
         peer.on(
@@ -283,7 +289,14 @@ class WebRTCRelayClient:
         await peer.setLocalDescription(peer_offer)
         await self._wait_for_ice_gathering_complete(peer)
 
-        peer_offer_args = OfferArgs(sdp=peer.localDescription.sdp, type=peer.localDescription.type)
+        peer_offer_args = OfferArgs(
+            sdp=peer.localDescription.sdp,
+            type=peer.localDescription.type,
+            receive_video=receive_video,
+            receive_lidar=receive_lidar,
+            receive_robot_data=receive_robot_data,
+            subscribed_topics=subscribed_topics or []
+        )
         logger.info(f"sending webrtc connection offer to webrtc relay server. {peer_offer_args=}")
         resp = await self.client.post(
             f"{self.url}/webrtc/offer", 

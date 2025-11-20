@@ -39,16 +39,39 @@ def _on_go2_message(state: WebRTCRelayAppState, robot_data: RobotData):
         return
 
     try:
-        if isinstance(robot_data.raw_message, bytes):
+        # Determine message type and topic
+        is_lidar = isinstance(robot_data.raw_message, bytes)
+        is_robot_data = isinstance(robot_data.raw_message, str)
+        
+        # Filter by type
+        if is_lidar:
+            if not state.receive_lidar:
+                return  # Skip lidar data
+        elif is_robot_data:
+            if not state.receive_robot_data:
+                return  # Skip robot data
+            
+            # Optional: Filter by specific topics
+            if state.subscribed_topics:
+                try:
+                    import json
+                    msg_dict = json.loads(robot_data.raw_message)
+                    topic = msg_dict.get('topic', '')
+                    if topic not in state.subscribed_topics:
+                        return  # Skip this topic
+                except (json.JSONDecodeError, KeyError):
+                    pass  # If we can't parse, send it anyway
+        
+        # Send the message if it passed filters
+        if is_lidar:
             state.relay_rtc_data_channel.send(robot_data.raw_message)
-        elif isinstance(robot_data.raw_message, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-            # payload = json.dumps(robot_data.raw_message, separators=(",", ":"))
+        elif is_robot_data:
             state.relay_rtc_data_channel.send(robot_data.raw_message)
         else:
             print(f"unknown raw type {type(robot_data.raw_message)}")
 
     except Exception as exception:
-        logger.warning(f"Failed to JSON-serialize GO2 message: {exception=}")
+        logger.warning(f"Failed to send GO2 message: {exception=}")
 
 def _on_go2_validated(state: WebRTCRelayAppState, topics_to_subscribe_to: list[str]):
     logger.info("on validated called")

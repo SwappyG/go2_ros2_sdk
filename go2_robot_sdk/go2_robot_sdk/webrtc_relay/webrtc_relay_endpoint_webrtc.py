@@ -14,11 +14,20 @@ router = APIRouter()
 class OfferArgs(BaseModel):
     sdp: str
     type: str
+    receive_video: bool = True
+    receive_lidar: bool = True
+    receive_robot_data: bool = True
+    subscribed_topics: list[str] = []  # Optional: specific topics to subscribe to
 
 class OfferReply(BaseModel):
     sdp: str
     type: str
 
+class UpdateSubscriptionArgs(BaseModel):
+    receive_video: bool | None = None
+    receive_lidar: bool | None = None
+    receive_robot_data: bool | None = None
+    subscribed_topics: list[str] | None = None
 
 def _on_datachannel_message(state: WebRTCRelayAppState, message: t.Any):
     """handler for messages inbound from relay'ed webrtc connection"""
@@ -65,10 +74,18 @@ async def offer(
         # Accept PC-created data channel
         new_relay_peer_connection.on("datachannel", lambda data: _on_datachannel(state, data))
 
-        # Attach GO2 video (if present)
-        if state.go2_video_track:
+         # Conditionally attach GO2 video based on subscription
+        if sdp.receive_video and state.go2_video_track:
             logger.info(f"adding go2 video track to new relay connection")
             new_relay_peer_connection.addTrack(state.media_relay.subscribe(state.go2_video_track))
+        else:
+            logger.info(f"skipping video track (receive_video={sdp.receive_video})")
+
+         # Store subscription preferences in state
+        state.receive_video = sdp.receive_video
+        state.receive_lidar = sdp.receive_lidar
+        state.receive_robot_data = sdp.receive_robot_data
+        state.subscribed_topics = set(sdp.subscribed_topics) if sdp.subscribed_topics else set()
 
         # SDP handshake
         logger.info(f"relay RTC setting remote description")
@@ -110,3 +127,56 @@ async def offer(
     except Exception as exception:
         logger.warning(f"Failed to create relay rtc sessiondescriptionprotocol (SDP). {exception=}")
         raise StateException(f"Failed to create relay rtc sessiondescriptionprotocol (SDP)") from exception
+
+@router.post("/subscription/update")
+async def update_subscription(
+    args: UpdateSubscriptionArgs,
+    state: WebRTCRelayAppState = Depends(get_app_state)
+):
+    """Update subscription preferences for the current connection"""
+    video_changed = False
+    old_video_state = state.receive_video
+    
+    if args.receive_video is not None:
+        state.receive_video = args.receive_video
+        video_changed = (old_video_state != args.receive_video)
+    
+    if args.receive_lidar is not None:
+        state.receive_lidar = args.receive_lidar
+    if args.receive_robot_data is not None:
+        state.receive_robot_data = args.receive_robot_data
+    if args.subscribed_topics is not None:
+        state.subscribed_topics = set(args.subscribed_topics)
+    
+    # Update video track if video subscription changed
+    if video_changed and state.relay_rtc_peer_connection:
+        transceivers = state.relay_rtc_peer_connection.getTransceivers()
+        video_transceiver = None
+        for transceiver in transceivers:
+            if transceiver.kind == "video":
+                video_transceiver = transceiver
+                break
+        
+        if state.receive_video:
+            if video_transceiver is None and state.go2_video_track:
+                # Add video track (lines 78-80 logic)
+                logger.info("Adding video track to existing connection")
+                state.relay_rtc_peer_connection.addTrack(
+                    state.media_relay.subscribe(state.go2_video_track)
+                )
+            elif video_transceiver:
+                # Enable transceiver
+                video_transceiver.direction = "recvonly"
+                logger.info("Video track enabled")
+        else:
+            if video_transceiver:
+                # Disable transceiver
+                video_transceiver.direction = "inactive"
+                logger.info("Video track disabled")
+    
+    return {"status": "updated", "subscriptions": {
+        "receive_video": state.receive_video,
+        "receive_lidar": state.receive_lidar,
+        "receive_robot_data": state.receive_robot_data,
+        "subscribed_topics": list(state.subscribed_topics)
+    }}
