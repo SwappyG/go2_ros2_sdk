@@ -70,7 +70,7 @@ class WebRTCRelayClient:
             await self.client.aclose() 
 
     async def start(self, connect_go2: bool=True):
-        logger.debug("webrtc relay client starting")
+        logger.debug("webrtc relay client start")
         if connect_go2:
             await self._connect_to_go2()
 
@@ -79,7 +79,7 @@ class WebRTCRelayClient:
     async def change_obstacle_avoid_state(self, enabled: bool):
         """robot sits down on hind legs (like a real dog would)"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling change_obstacle_avoid_state")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=1001,
@@ -92,7 +92,7 @@ class WebRTCRelayClient:
         will stop moving. If the frequency is too low, there will be janky movement
         """
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling move")
     
         self._peer_datachannel.send(command_generator.gen_mov_command(
             x=forward_velocity, 
@@ -106,7 +106,7 @@ class WebRTCRelayClient:
         robot to move its feet. 0,0,0 is looking forward
         """
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling gaze")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['Euler'],
@@ -117,7 +117,7 @@ class WebRTCRelayClient:
     async def stand_up(self):
         """causes the robot to stand up if it's sitting. Does nothing if it's already standing"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling stand_up")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['StandUp'],
@@ -129,7 +129,7 @@ class WebRTCRelayClient:
         """robot slowly folds legs in to rest on its belly. This is the smoothest way to de-load the 
         motors in prep for turning the robot off"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling lie_down_on_belly")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['StandDown'],
@@ -140,7 +140,7 @@ class WebRTCRelayClient:
     async def sit_on_hind_legs(self):
         """robot sits down on hind legs (like a real dog would)"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling sit_on_hind_legs")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['Sit'],
@@ -151,7 +151,7 @@ class WebRTCRelayClient:
     async def stand_up_from(self):
         """robot stands up from sitting position (gets up from SIT command)"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling stand_up_from")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['RiseSit'],
@@ -162,7 +162,7 @@ class WebRTCRelayClient:
     async def recovery_stand(self):
         """Recovery stand - robot stands up from any position"""
         if self._peer_datachannel is None:
-            raise StateException("call start before calling moving")
+            raise StateException("call start before calling recovery_stand")
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=ROBOT_CMD['RecoveryStand'],
@@ -191,6 +191,54 @@ class WebRTCRelayClient:
             parameters=None,
             topic=RTC_TOPIC['SPORT_MOD'],
         ))
+
+    async def send_json_command(self, command_str: str) -> None:
+        """
+        Send a raw JSON command to the robot.
+
+        Args:
+            command_str: JSON command as a valid JSON string 
+                (e.g., '{"type": "msg", "topic": "...", ...}')
+
+        Raises:
+            StateException: If peer datachannel is not initialized
+            ValueError: If command format is invalid
+            json.JSONDecodeError: If command string is invalid JSON
+
+        Usage:
+            command_str = '{"type": "msg", "topic": "rt/api/sport/request", "data": {"header": {"identity": {"id": 12345, "api_id": 1004}}, "parameter": ""}}'
+        """
+        if self._peer_datachannel is None:
+            raise StateException("call start before calling send_json_command")
+
+        # Validate it's valid JSON
+        try:
+            cmd_dict = json.loads(command_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON string: {e}")
+
+        # Validate command structure
+        try:
+            # Check required fields
+            if not isinstance(cmd_dict, dict):
+                raise ValueError("Command must be a dictionary/JSON object")
+            if "type" not in cmd_dict:
+                raise ValueError("Command missing 'type' field")
+            if "topic" not in cmd_dict:
+                raise ValueError("Command missing 'topic' field")
+            if "data" not in cmd_dict:
+                raise ValueError("Command missing 'data' field")
+            if "header" not in cmd_dict["data"]:
+                raise ValueError("Command missing 'data.header' field")
+            if "identity" not in cmd_dict["data"]["header"]:
+                raise ValueError("Command missing 'data.header.identity' field")
+            if "api_id" not in cmd_dict["data"]["header"]["identity"]:
+                raise ValueError("Command missing 'data.header.identity.api_id' field")
+        except (KeyError, TypeError) as e:
+            raise ValueError(f"Invalid command structure: {e}")
+
+        # Send the command JSON string
+        self._peer_datachannel.send(command_str)
 
     async def _connect_to_go2(self):
         logger.info(f"instructing webrtc relay server to connect to the go2 at {self.robot_config=}")
@@ -356,6 +404,14 @@ async def keyboard_control_loop(client):
             elif key == "c":
                 await client.move(0.0, 0.0, -0.5)
                 print("command: rotate right")
+            elif key == "t":
+                # Test JSON command
+                custom_cmd = '{"type": "msg", "topic": "rt/api/sport/request", "data": {"header": {"identity": {"id": 12345, "api_id": 1004}}, "parameter": ""}}'
+                try:
+                    await client.send_json_command(custom_cmd)
+                    print("✓ JSON command sent successfully!")
+                except Exception as e:
+                    print(f"✗ Error: {e}")
             else:
                 print(f"unknown command: {key}")
     except asyncio.CancelledError:
