@@ -27,6 +27,7 @@ from go2_robot_sdk.webrtc_relay.gui_widgets import (
     VideoWidget, LidarWidget, OdometryWidget, StatusWidget
 )
 from go2_robot_sdk.webrtc_relay.gui_configurations import GuiConfig
+from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, QtInputAdapter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -241,30 +242,19 @@ class GO2GuiClient(QMainWindow):
         self.video_task: asyncio.Task[None] | None = None
         self.invoker = GuiInvoker.make_invoker_on_gui_thread()
         
-        # Movement state
-        self.is_moving = False
-        self.current_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
-        self.target_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
-        
-        # Velocity ramping state
-        self.velocity_ramp_time_ms = GuiConfig.VELOCITY_RAMP_TIME_MS
-        self.ramp_start_times = {"forward": None, "strafe": None, "rotation": None}
-        self.ramp_start_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
-        
-        # Track pressed keys to ensure stop on release
-        self.pressed_keys = set()
+        # Keyboard command handler (will be initialized in add_client)
+        self.keyboard_handler: KeyboardCommandHandler | None = None
+        self.keyboard_adapter: QtInputAdapter | None = None
         
         self.init_ui()
         self.connect_signals()
         
-        # Timer for continuous movement updates
+        # Timer for continuous movement updates (will be connected to handler)
         self.move_timer = QTimer()
-        self.move_timer.timeout.connect(self.send_movement_command)
         self.move_timer.setInterval(GuiConfig.MOVEMENT_UPDATE_INTERVAL_MS)
         
-        # Timer for velocity ramping
+        # Timer for velocity ramping (will be connected to handler)
         self.ramp_timer = QTimer()
-        self.ramp_timer.timeout.connect(self._update_velocity_ramp)
         self.ramp_timer.setInterval(20)  # 50 Hz for smooth ramping
         
         # Set focus policy to receive keyboard events
@@ -371,6 +361,13 @@ class GO2GuiClient(QMainWindow):
     def add_client(self, client: WebRTCRelayClient):
         """Add WebRTCRelayClient to the GUI client."""
         self.client = client
+        
+        # Initialize keyboard command handler
+        self.keyboard_handler = KeyboardCommandHandler(client)
+        self.keyboard_adapter = self.keyboard_handler.create_qt_adapter()
+        
+        # Setup Qt timers with handler
+        self.keyboard_handler.setup_qt_timers(self.ramp_timer, self.move_timer)
     
     def connect_signals(self):
         """Connect Qt signals to slots."""
@@ -426,215 +423,41 @@ class GO2GuiClient(QMainWindow):
         self.signals.status_message.connect(self.status_widget.set_info)
     
     def keyPressEvent(self, event: QKeyEvent):
-        """Handle keyboard input using configurable key bindings."""
+        """Handle keyboard input using keyboard command handler."""
         if event.isAutoRepeat():
             return
         
-        key = event.key()
-        self.pressed_keys.add(key)
+        if self.keyboard_adapter:
+            self.keyboard_adapter.handle_key_press(event.key())
         
-        # Use configurable key bindings
-        action = GuiConfig.get_action_for_key(key)
-        
-        if action == "forward":
-            velocity_multiplier = self.control_panel.linear_velocity_spinbox.value()
-            self.set_target_velocity("forward", velocity_multiplier)
-        elif action == "backward":
-            velocity_multiplier = self.control_panel.linear_velocity_spinbox.value()
-            self.set_target_velocity("forward", -velocity_multiplier)
-        elif action == "strafe_left":
-            velocity_multiplier = self.control_panel.linear_velocity_spinbox.value()
-            self.set_target_velocity("strafe", velocity_multiplier)
-        elif action == "strafe_right":
-            velocity_multiplier = self.control_panel.linear_velocity_spinbox.value()
-            self.set_target_velocity("strafe", -velocity_multiplier)
-        elif action == "rotate_left":
-            velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
-            # if self.target_velocities["forward"] >= 0:
-            #     velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
-            # else:
-            #     velocity_multiplier = -self.control_panel.rotation_velocity_spinbox.value()
-            self.set_target_velocity("rotation", velocity_multiplier)
-        elif action == "rotate_right":
-            velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
-            # if self.target_velocities["forward"] >= 0:
-            #     velocity_multiplier = self.control_panel.rotation_velocity_spinbox.value()
-            # else:
-            #     velocity_multiplier = -self.control_panel.rotation_velocity_spinbox.value()
-            self.set_target_velocity("rotation", -velocity_multiplier)
-        elif action == "stop":
-            self.stop_movement()
-        elif action == "quit":
-            self.close()
+        # Handle quit action separately (close window)
+        if self.keyboard_handler:
+            action = self.keyboard_handler._get_action_for_qt_key(event.key())
+            if action == "quit":
+                self.close()
     
     def keyReleaseEvent(self, event: QKeyEvent):
-        """Handle keyboard release - stop movement when keys are released."""
+        """Handle keyboard release using keyboard command handler."""
         if event.isAutoRepeat():
             return
         
-        key = event.key()
-        self.pressed_keys.discard(key)
-        
-        # Use configurable key bindings
-        action = GuiConfig.get_action_for_key(key)
-        
-        if action == "forward" or action == "backward":
-            # Check if other forward/backward key is still pressed
-            forward_key = GuiConfig.get_key_for_action("forward")
-            backward_key = GuiConfig.get_key_for_action("backward")
-            if forward_key not in self.pressed_keys and backward_key not in self.pressed_keys:
-                self.set_target_velocity("forward", 0.0)
-        elif action == "strafe_left" or action == "strafe_right":
-            # Check if other strafe key is still pressed
-            strafe_left_key = GuiConfig.get_key_for_action("strafe_left")
-            strafe_right_key = GuiConfig.get_key_for_action("strafe_right")
-            if strafe_left_key not in self.pressed_keys and strafe_right_key not in self.pressed_keys:
-                self.set_target_velocity("strafe", 0.0)
-        elif action == "rotate_left" or action == "rotate_right":
-            # Check if other rotate key is still pressed
-            rotate_left_key = GuiConfig.get_key_for_action("rotate_left")
-            rotate_right_key = GuiConfig.get_key_for_action("rotate_right")
-            if rotate_left_key not in self.pressed_keys and rotate_right_key not in self.pressed_keys:
-                self.set_target_velocity("rotation", 0.0)
-    
-    def set_target_velocity(self, direction: str, value: float):
-        """Set target velocity for a specific direction (with ramping)."""
-        self.target_velocities[direction] = value
-        
-        # Start ramping if velocity changed
-        if value != self.current_velocities[direction]:
-            self.ramp_start_velocities[direction] = self.current_velocities[direction]
-            self.ramp_start_times[direction] = QtCore.QDateTime.currentMSecsSinceEpoch()
-            
-            # Start ramp timer if not already running
-            if not self.ramp_timer.isActive():
-                self.ramp_timer.start()
-        
-        # Start/update movement timer if any target velocity is non-zero
-        if any(v != 0.0 for v in self.target_velocities.values()):
-            if not self.move_timer.isActive():
-                self.move_timer.start()
-        else:
-            self.move_timer.stop()
-    
-    def _update_velocity_ramp(self):
-        """Update current velocities based on ramping logic."""
-        current_time = QtCore.QDateTime.currentMSecsSinceEpoch()
-        ramp_time_ms = self.control_panel.ramp_spinbox.value()
-        
-        all_ramped = True
-        for direction in ["forward", "strafe", "rotation"]:
-            target = self.target_velocities[direction]
-            current = self.current_velocities[direction]
-            
-            if abs(target - current) < 0.001:
-                # Already at target
-                self.current_velocities[direction] = target
-                continue
-            
-            if ramp_time_ms <= 0:
-                # No ramping, set immediately
-                self.current_velocities[direction] = target
-                continue
-            
-            # Calculate ramp progress
-            start_time = self.ramp_start_times.get(direction)
-            if start_time is None:
-                start_time = current_time
-                self.ramp_start_times[direction] = start_time
-                self.ramp_start_velocities[direction] = current
-            
-            elapsed = current_time - start_time
-            progress = min(elapsed / ramp_time_ms, 1.0)
-            
-            # Interpolate between start and target
-            start_vel = self.ramp_start_velocities[direction]
-            self.current_velocities[direction] = start_vel + (target - start_vel) * progress
-            
-            if abs(target - self.current_velocities[direction]) >= 0.001:
-                all_ramped = False
-        
-        # Stop ramp timer if all velocities are ramped
-        if all_ramped:
-            self.ramp_timer.stop()
-        
-        # Send command with current (ramped) velocities
-        self._send_move_command()
+        if self.keyboard_adapter:
+            self.keyboard_adapter.handle_key_release(event.key())
     
     def set_velocity(self, direction: str, value: float):
-        """Set velocity directly (used by button controls, bypasses ramping for immediate response)."""
-        self.set_target_velocity(direction, value)
+        """Set velocity directly (used by button controls)."""
+        if self.keyboard_handler:
+            self.keyboard_handler.set_target_velocity(direction, value)
     
     def stop_movement(self):
         """Stop all movement immediately using STOPMOVE command."""
-        self.target_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
-        self.current_velocities = {"forward": 0.0, "strafe": 0.0, "rotation": 0.0}
-        self.pressed_keys.clear()
-        self.move_timer.stop()
-        self.ramp_timer.stop()
-        
-        # Send STOPMOVE command instead of move command with zeros
-        if self.client:
-            try:
-                loop = getattr(self.client, "_loop", None)
-                if loop is None:
-                    logger.warning("Client event loop not available; cannot send stop_move command")
-                    return
-
-                # Schedule the client's async stop_move() coroutine on the client's event loop
-                asyncio.run_coroutine_threadsafe(
-                    self.client.stop_move(),
-                    loop
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send stop_move command: {e}")
+        if self.keyboard_handler:
+            self.keyboard_handler.stop_movement()
     
     def focusOutEvent(self, event: QFocusEvent):
         """Handle window focus loss - stop all movement for safety."""
         self.stop_movement()
         super().focusOutEvent(event)
-    
-    def send_movement_command(self):
-        """Send current movement command (called by timer)."""
-        self._send_move_command()
-    
-    def _send_move_command(self):
-        """Async helper to send move command."""
-        if self.client:
-            try:
-                # print("Sending move command")
-                # loop = asyncio.get_event_loop()
-
-                # # pass
-                # loop.call_soon_threadsafe(
-                #     self.client.move,
-                #     self.current_velocities["forward"],
-                #     self.current_velocities["strafe"],
-                #     self.current_velocities["rotation"]
-                # )
-                logger.debug("Sending move command")
-                # Use the event loop that the client is running on (set in client_main)
-                loop = getattr(self.client, "_loop", None)
-                if loop is None:
-                    logger.warning("Client event loop not available; cannot send move command")
-                    return
-
-                if self.current_velocities["forward"] >= 0:
-                    rotation_velocity = self.current_velocities["rotation"]
-                else:
-                    rotation_velocity = -self.current_velocities["rotation"]
-
-                # Schedule the client's async move() coroutine on the client's event loop
-                asyncio.run_coroutine_threadsafe(
-                    self.client.move(
-                        self.current_velocities["forward"],
-                        self.current_velocities["strafe"],
-                        rotation_velocity
-                    ),
-                    loop
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send move command: {e}")
 
     def on_connect(self):
         pass

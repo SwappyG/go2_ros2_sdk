@@ -13,6 +13,13 @@ import json
 import base64
 import os
 
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+    keyboard = None
+
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import ConnectArgs
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import OfferArgs, OfferReply
 from go2_robot_sdk.infrastructure.webrtc.data_decoder import WebRTCDataDecoder
@@ -26,6 +33,7 @@ from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 from go2_robot_sdk.domain.constants.robot_commands import ROBOT_CMD
 from go2_robot_sdk.application.utils import command_generator
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
+from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, TerminalInputAdapter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -466,57 +474,186 @@ class WebRTCRelayClient:
 
 
 async def keyboard_control_loop(client):
-    """Read single-line keyboard commands from stdin in a thread and send move commands.
-
-    Keys:
-      w -> up (forward)
-      s -> down (back)
-      a -> left (strafe left)
-      d -> right (strafe right)
-      q -> quit the control loop
+    """Read keyboard commands in real-time and send move commands using keyboard handler.
+    
+    Uses the 'keyboard' library to detect key press/release events.
+    Keys are configured in keyboard_config.json
+    
+    Requires: pip install keyboard
     """
-    print("Keyboard control: w(up), a(left), s(down), d(right), q(quit)")
+    if not KEYBOARD_AVAILABLE:
+        logger.error("'keyboard' library not available. Install with: pip install keyboard")
+        logger.error("Falling back to line-based input (requires Enter key)")
+        return await keyboard_control_loop_fallback(client)
+    
+    # Set client event loop reference for handler
+    client._loop = asyncio.get_running_loop()
+    
+    # Create keyboard command handler and terminal adapter
+    handler = KeyboardCommandHandler(client)
+    adapter = handler.create_terminal_adapter()
+    
+    # Get the event loop for thread-safe scheduling
+    loop = asyncio.get_running_loop()
+    
+    # Build reverse mapping: terminal key -> action
+    # Map both the config key and common variations
+    terminal_key_to_action = {}
+    for action, keys in handler.config["key_bindings"].items():
+        if "terminal" in keys:
+            terminal_key = keys["terminal"]
+            # Map the key as-is
+            terminal_key_to_action[terminal_key] = action
+            # Also map lowercase version (keyboard library returns lowercase)
+            terminal_key_to_action[terminal_key.lower()] = action
+            # Handle special cases
+            if terminal_key == " ":
+                terminal_key_to_action["space"] = action
+            elif terminal_key == "space":
+                terminal_key_to_action[" "] = action
+    
+    # Track currently pressed keys
+    pressed_keys: set[str] = set()
+    quit_requested = False
+    
+    def on_key_event(event):
+        """Handle key press/release events (called from keyboard library thread)."""
+        # Schedule the actual handling on the event loop thread
+        if event.event_type == keyboard.KEY_DOWN:
+            key = event.name.lower()
+            pressed_keys.add(key)
+            
+            # Handle quit
+            if key == 'q':
+                nonlocal quit_requested
+                quit_requested = True
+                return
+            
+            # Get action for this key
+            action = terminal_key_to_action.get(key)
+            if action:
+                # Handle stop action (synchronous, safe to call from any thread)
+                if action == "stop":
+                    handler.stop_movement()
+                    return
+                
+                # Schedule key press handling on event loop
+                # Pass the action directly to handler to avoid double conversion
+                def handle_press():
+                    handler.handle_key_press(action)
+                loop.call_soon_threadsafe(handle_press)
+        elif event.event_type == keyboard.KEY_UP:
+            key = event.name.lower()
+            pressed_keys.discard(key)
+            
+            # Get action for this key
+            action = terminal_key_to_action.get(key)
+            if action and action != "quit" and action != "stop":
+                # Schedule key release handling on event loop
+                # Pass the action, not the key, to the handler
+                def handle_release():
+                    handler.handle_key_release(action)
+                loop.call_soon_threadsafe(handle_release)
+    
+    # Register keyboard hooks
+    keyboard.hook(on_key_event)
+    
+    print("Keyboard control active (keys configured in keyboard_config.json)")
+    print("Hold keys to move. Press 'q' to quit, space to stop")
+    print("Note: Requires 'keyboard' library (pip install keyboard)")
+    
+    try:
+        # Keep running until quit is requested
+        while not quit_requested:
+            await asyncio.sleep(0.1)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        # Cleanup
+        keyboard.unhook_all()
+        handler.stop_movement()
+        print("Keyboard control stopped")
+
+
+async def keyboard_control_loop_fallback(client):
+    """Fallback keyboard control using line-based input (requires Enter key)."""
+    # Set client event loop reference for handler
+    client._loop = asyncio.get_running_loop()
+    
+    # Create keyboard command handler and terminal adapter
+    handler = KeyboardCommandHandler(client)
+    adapter = handler.create_terminal_adapter()
+    
+    # Track last action for terminal mode (to stop on new key press)
+    last_action: str | None = None
+    
+    print("Keyboard control active (keys configured in keyboard_config.json)")
+    print("Press key + Enter. Press 'q' to quit, space to stop")
+    print("Note: For real-time key detection, install 'keyboard' library: pip install keyboard")
     try:
         while True:
             line = await asyncio.to_thread(sys.stdin.readline)
             if not line:
                 await asyncio.sleep(0.1)
                 continue
-            key = line.strip().lower()
+            key = line.strip()
             if not key:
                 continue
-            if key == "q":
+            
+            # Handle quit action
+            action = handler._get_action_for_terminal_key(key.lower())
+            if action == "quit":
                 print("command: quit")
+                handler.stop_movement()
                 break
-            if key == "w":
-                await client.move(0.5, 0.0, 0.0)
-                print("command: up")
-            elif key == "s":
-                await client.move(-0.5, 0.0, 0.0)
-                print("command: down")
-            elif key == "a":
-                await client.move(0.0, 0.5, 0.0)
-                print("command: left")
-            elif key == "d":
-                await client.move(0.0, -0.5, 0.0)
-                print("command: right")
-            elif key == "z":
-                await client.move(0.0, 0.0, 0.5)
-                print("command: rotate left")
-            elif key == "c":
-                await client.move(0.0, 0.0, -0.5)
-                print("command: rotate right")
-            elif key == "t":
-                # Test JSON command
+            
+            # Handle stop action
+            if action == "stop":
+                handler.stop_movement()
+                last_action = None
+                print("command: stop")
+                continue
+            
+            # Handle test JSON command (keep for backward compatibility)
+            if key.lower() == "t":
+                # Stop any ongoing movement
+                handler.stop_movement()
+                last_action = None
                 custom_cmd = '{"type": "msg", "topic": "rt/api/sport/request", "data": {"header": {"identity": {"id": 12345, "api_id": 1004}}, "parameter": ""}}'
                 try:
                     await client.send_json_command(custom_cmd)
                     print("✓ JSON command sent successfully!")
                 except Exception as e:
                     print(f"✗ Error: {e}")
+                continue
+            
+            # For terminal mode: stop previous movement if a new action is pressed
+            # or if the same action is pressed again (toggle behavior)
+            if action:
+                if action == last_action:
+                    # Same key pressed again - stop movement (toggle)
+                    handler.stop_movement()
+                    last_action = None
+                    print(f"command: {action} (stopped)")
+                else:
+                    # Different action - stop previous, start new
+                    if last_action is not None:
+                        handler.stop_movement()
+                        await asyncio.sleep(0.05)  # Brief pause to ensure stop command is sent
+                    # Pass key to adapter for handling
+                    adapter.handle_key_press(key)
+                    last_action = action
+                    print(f"command: {action}")
             else:
-                print(f"unknown command: {key}")
+                # Unknown key - stop movement
+                if last_action is not None:
+                    handler.stop_movement()
+                    last_action = None
+                    print("command: stop (unknown key)")
+                    
     except asyncio.CancelledError:
+        # Stop handler movement on cancellation
+        handler.stop_movement()
         return
 
 

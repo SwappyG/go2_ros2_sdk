@@ -23,7 +23,8 @@ dependencies = [
     "qasync",
     "PySide6 >=6.6, <7",
     "open3d >= 0.19, < 1",
-    "vtk"
+    "vtk",
+    "keyboard >= 0.13, < 1"
 ]
 
 # [tool.poetry.dependencies]
