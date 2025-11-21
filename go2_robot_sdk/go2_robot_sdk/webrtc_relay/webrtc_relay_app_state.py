@@ -20,6 +20,7 @@ class WebRTCRelayAppState:
     relay_rtc_peer_connection: RTCPeerConnection | None = None
     relay_rtc_data_channel: RTCDataChannel | None = None
     go2_video_track: MediaStreamTrack | None = None
+    subscribed_topics: set[str] = dataclasses.field(default_factory=set)
     # WebRTC stats monitoring
     relay_stats_monitor: 'WebRTCStatsMonitor | None' = None  # RELAY→CLIENT
     client_to_relay_stats_monitor: 'WebRTCStatsMonitor | None' = None  # CLIENT→RELAY (from relay's perspective)

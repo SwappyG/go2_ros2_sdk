@@ -59,6 +59,9 @@ def _on_go2_validated(state: WebRTCRelayAppState, topics_to_subscribe_to: list[s
                 state.go2.data_channel.send(
                     json.dumps({"type": "subscribe", "topic": topic})
                 )
+            
+            # Track subscribed topics in state
+            state.subscribed_topics = set(topics_to_subscribe_to)
 
             state.go2.publish(RTC_TOPIC['ULIDAR_SWITCH'], 'on')
     except Exception as e:
@@ -93,6 +96,8 @@ class ConnectArgs(BaseModel):
 class ConnectReply(BaseModel):
     robot_ip: str
 
+class UpdateSubscriptionsArgs(BaseModel):
+    topics: list[str]
 
 @router.post("/connect", response_model=ConnectReply)
 async def connect(args: ConnectArgs, state: WebRTCRelayAppState = Depends(get_app_state)):
@@ -175,3 +180,64 @@ async def disconnect(_args: DisconnectArgs, state: WebRTCRelayAppState = Depends
         state.go2_video_track = None
 
     return
+
+@router.post("/update-subscriptions", response_model=DisconnectReply)
+async def update_subscriptions(
+    args: UpdateSubscriptionsArgs,
+    state: WebRTCRelayAppState = Depends(get_app_state)
+):
+    """
+    Update topic subscriptions for the current GO2 connection.
+    This will unsubscribe from old topics and subscribe to new ones.
+    """
+    if state.go2 is None:
+        raise StateException("Not connected to GO2. Call /connect first.")
+    
+    if not state.go2.data_channel or state.go2.data_channel.readyState != "open":
+        raise StateException("GO2 data channel is not open")
+    
+    try:
+        # Get current and new topics as sets for efficient comparison
+        current_topics = set(getattr(state, 'subscribed_topics', set()))
+        new_topics = set(args.topics)
+        
+        # Only unsubscribe from topics not in new list
+        topics_to_unsubscribe = current_topics - new_topics
+        # Only subscribe to topics not already subscribed
+        topics_to_subscribe = new_topics - current_topics
+        
+        # Helper function to send subscription messages
+        def send_subscription(action: str, topic: str):
+            state.go2.data_channel.send(
+                json.dumps({"type": action, "topic": topic})
+            )
+            action_past = "unsubscribed from" if action == "unsubscribe" else "subscribed to"
+            logger.info(f"{action_past} topic: {topic}")
+        
+        # Unsubscribe from removed topics
+        for topic in topics_to_unsubscribe:
+            send_subscription("unsubscribe", topic)
+        
+        # Subscribe to new topics
+        for topic in topics_to_subscribe:
+            send_subscription("subscribe", topic)
+        
+        # Update state
+        state.subscribed_topics = new_topics
+        
+        return DisconnectReply()
+    except Exception as e:
+        logger.error(f"Error updating subscriptions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update subscriptions: {e}")
+
+@router.get("/subscriptions")
+async def get_subscriptions(
+    state: WebRTCRelayAppState = Depends(get_app_state)
+):
+    """Get the list of topics currently subscribed to."""
+    if state.go2 is None:
+        raise StateException("Not connected to GO2. Call /connect first.")
+    
+    return {
+        "subscribed_topics": list(state.subscribed_topics)
+    }

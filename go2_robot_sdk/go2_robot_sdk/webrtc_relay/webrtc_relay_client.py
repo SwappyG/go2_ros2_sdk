@@ -40,7 +40,8 @@ class WebRTCRelayClient:
         robot_config: RobotConfig,
         on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]],
         on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
-        on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]]
+        on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
+        topics_to_subscribe_to: list[str] | None = None
     ):
         self.url = relay_url
         self.robot_config = robot_config
@@ -52,7 +53,7 @@ class WebRTCRelayClient:
         self._peer_connection = None
         self._peer_datachannel = None
         self._stats_monitor: WebRTCStatsMonitor | None = None
-        
+        self._topics_to_subscribe_to = topics_to_subscribe_to
 
     async def __aenter__(self):
         return self
@@ -242,17 +243,41 @@ class WebRTCRelayClient:
 
     async def _connect_to_go2(self):
         logger.info(f"instructing webrtc relay server to connect to the go2 at {self.robot_config=}")
-        r = await self.client.post(f"{self.url}/go2/connect", json=ConnectArgs(
-            robot_ip=self.robot_config.robot_ip_list[0],
-            robot_num=1,  # TODO (swapnil) - pipe this properly
-            token=self.robot_config.token
-        ).model_dump())
+
+        # Build ConnectArgs - if topics_to_subscribe_to is None, don't pass it
+        # The server will use its default (TOPICS_TO_SUBSCRIBE_TO)
+        connect_args_dict = {
+            "robot_ip": self.robot_config.robot_ip_list[0],
+            "robot_num": 1,  # TODO (swapnil) - pipe this properly
+            "token": self.robot_config.token
+        }
+        
+        # Only add topics if custom ones are provided
+        if self._topics_to_subscribe_to is not None:
+            connect_args_dict["topics_to_subscribe_to"] = self._topics_to_subscribe_to
+            logger.info(f"Connecting with custom topics: {self._topics_to_subscribe_to}")
+        
+        connect_args = ConnectArgs(**connect_args_dict)
+
+        r = await self.client.post(f"{self.url}/go2/connect", json=connect_args.model_dump())
+
         if r.status_code != 200:
             err_json = r.json()
             logger.warning(f"{r.status_code=} {err_json=}")
             recreate_and_raise_exception(err_json)
             
         logger.info("webrtc server reported successful connection to go2", r.json())
+
+        # Sync client state with server subscriptions
+        try:
+            r = await self.client.get(f"{self.url}/go2/subscriptions")
+            if r.status_code == 200:
+                data = r.json()
+                server_topics = data.get("subscribed_topics", [])
+                self._topics_to_subscribe_to = server_topics
+                logger.info(f"Synced client subscriptions with server: {server_topics}")
+        except Exception as e:
+            logger.warning(f"Could not sync subscriptions: {e}")
 
     async def _disconnect_from_go2(self):
         try:
@@ -262,6 +287,77 @@ class WebRTCRelayClient:
             logger.info("[client] /disconnect:", r.json())
         except Exception as e:
             logger.info("[client] /disconnect failed:", e)
+
+    async def get_subscriptions(self) -> list[str]:
+        """
+        Get the list of topics subscribed to.
+        Returns empty list if no topics are set.
+        """
+        if self._topics_to_subscribe_to is None:
+            # Try to fetch from server
+            try:
+                r = await self.client.get(f"{self.url}/go2/subscriptions")
+                if r.status_code == 200:
+                    data = r.json()
+                    self._topics_to_subscribe_to = data.get("subscribed_topics", [])
+                    return self._topics_to_subscribe_to
+            except Exception as e:
+                logger.warning(f"Could not fetch subscriptions from server: {e}")
+            return []
+        return self._topics_to_subscribe_to
+
+    async def add_topic_to_subscriptions(self, topic: str):
+        """
+        Add a topic to the list of topics subscribed to.
+        """
+        if not topic:
+            raise ValueError("topic cannot be empty")
+        
+        # Initialize if None
+        if self._topics_to_subscribe_to is None:
+            self._topics_to_subscribe_to = []
+        
+        if topic not in self._topics_to_subscribe_to:
+            self._topics_to_subscribe_to.append(topic)
+            await self._update_subscriptions_go2()
+
+    async def remove_topic_from_subscriptions(self, topic: str):
+        """
+        Remove a topic from the list of topics subscribed to.
+        """
+        if not topic:
+            raise ValueError("topic cannot be empty")
+        
+        if self._topics_to_subscribe_to is None:
+            raise ValueError("No topics currently subscribed")
+        
+        if topic in self._topics_to_subscribe_to:
+            self._topics_to_subscribe_to.remove(topic)
+            await self._update_subscriptions_go2()
+
+    async def _update_subscriptions_go2(self):
+        """
+        Update the topics subscribed to from the GO2 robot without reconnecting.
+        
+        Args:
+            topics: List of topic strings to subscribe to
+        """
+        if not self._topics_to_subscribe_to:
+            raise ValueError("topics list cannot be empty")
+        
+        logger.info(f"Updating subscription topics to: {self._topics_to_subscribe_to}")
+        
+        r = await self.client.post(
+            f"{self.url}/go2/update-subscriptions",
+            json={"topics": self._topics_to_subscribe_to}
+        )
+        
+        if r.status_code != 200:
+            err_json = r.json()
+            logger.warning(f"{r.status_code=} {err_json=}")
+            recreate_and_raise_exception(err_json)
+        
+        logger.info("Successfully updated topic subscriptions")
 
     async def _create_peer_connection(self) -> tuple[RTCPeerConnection, RTCDataChannel]:
         logger.info(f"establishing WebRTC connection to webrtc relay server")
@@ -423,7 +519,8 @@ async def main(
     config: RobotConfig,
     on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]], 
     on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
-    on_lidar_update: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]]
+    on_lidar_update: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
+    topics_to_subscribe_to: list[str] | None = None
 ):
     async with WebRTCRelayClient(
         relay_url=str(relay_url), 
@@ -431,6 +528,7 @@ async def main(
         on_video_track=on_video_track,
         on_lidar_frame=on_lidar_update,
         on_robot_data=on_robot_data,
+        topics_to_subscribe_to=topics_to_subscribe_to
     ) as client:
         logger.info("created webrtc relay client, calling start")
         await client.start(True)
@@ -470,6 +568,16 @@ if __name__ == "__main__":
         obstacle_avoidance=True, 
         conn_mode='single'
     )
+
+    TOPICS_TO_SUBSCRIBE_TO = [
+        # RTC_TOPIC['MULTIPLE_STATE'],
+        # RTC_TOPIC['SPORT_MOD_STATE'],
+        # RTC_TOPIC['LOW_STATE'],
+        # RTC_TOPIC['ULIDAR'], 
+        # RTC_TOPIC['ULIDAR_ARRAY'], 
+        # RTC_TOPIC['ULIDAR_STATE'],
+        RTC_TOPIC['ROBOTODOM'],
+    ]
 
     # async def on_video_track(track: MediaStreamTrack):
     #     print(f"Video track received: {track}")
@@ -541,9 +649,18 @@ if __name__ == "__main__":
             #         logger.warning(f"robot pose update failed: {e}")
 
         async def on_robot_data(robot_data: RobotData):
-            pass
+            logger.info(f"robot data received: {robot_data}")
 
-        asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
+        asyncio.run(
+            main(
+                relay_url=args.api,
+                config=config,
+                on_robot_data=on_robot_data,
+                on_video_track=on_video_track,
+                on_lidar_update=on_lidar_update,
+                topics_to_subscribe_to=TOPICS_TO_SUBSCRIBE_TO,
+            )
+        )
         # finally:
         #     if ff:
         #         ff.close()
