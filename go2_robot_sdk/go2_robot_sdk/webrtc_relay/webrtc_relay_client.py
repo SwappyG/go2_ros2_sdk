@@ -40,7 +40,11 @@ class WebRTCRelayClient:
         robot_config: RobotConfig,
         on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]],
         on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
-        on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]]
+        on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
+        receive_video: bool = True,
+        receive_lidar: bool = True,
+        receive_robot_data: bool = True,
+        subscribed_topics: list[str] = None
     ):
         self.url = relay_url
         self.robot_config = robot_config
@@ -52,7 +56,10 @@ class WebRTCRelayClient:
         self._peer_connection = None
         self._peer_datachannel = None
         self._stats_monitor: WebRTCStatsMonitor | None = None
-        
+        self._receive_video = receive_video
+        self._receive_lidar = receive_lidar
+        self._receive_robot_data = receive_robot_data
+        self._subscribed_topics = subscribed_topics or []
 
     async def __aenter__(self):
         return self
@@ -74,7 +81,12 @@ class WebRTCRelayClient:
         if connect_go2:
             await self._connect_to_go2()
 
-        self._peer_connection, self._peer_datachannel = await self._create_peer_connection()  
+        self._peer_connection, self._peer_datachannel = await self._create_peer_connection(
+            receive_video=self._receive_video,
+            receive_lidar=self._receive_lidar,
+            receive_robot_data=self._receive_robot_data,
+            subscribed_topics=self._subscribed_topics
+        )  
 
     async def change_obstacle_avoid_state(self, enabled: bool):
         """robot sits down on hind legs (like a real dog would)"""
@@ -83,7 +95,7 @@ class WebRTCRelayClient:
     
         self._peer_datachannel.send(command_generator.gen_command(
             cmd=1001,
-            parameters={"enabled": enabled},
+            parameters={"enable": enabled},
             topic=RTC_TOPIC['OBSTACLE_AVOID'],
         ))
 
@@ -436,7 +448,11 @@ async def main(
     config: RobotConfig,
     on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]], 
     on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
-    on_lidar_update: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]]
+    on_lidar_update: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
+    receive_video: bool = True,
+    receive_lidar: bool = True,
+    receive_robot_data: bool = True,
+    subscribed_topics: list[str] = None
 ):
     async with WebRTCRelayClient(
         relay_url=str(relay_url), 
@@ -444,6 +460,10 @@ async def main(
         on_video_track=on_video_track,
         on_lidar_frame=on_lidar_update,
         on_robot_data=on_robot_data,
+        receive_video=receive_video,
+        receive_lidar=receive_lidar,
+        receive_robot_data=receive_robot_data,
+        subscribed_topics=subscribed_topics
     ) as client:
         logger.info("created webrtc relay client, calling start")
         await client.start(True)
@@ -483,6 +503,21 @@ if __name__ == "__main__":
         obstacle_avoidance=True, 
         conn_mode='single'
     )
+
+    TOPICS_TO_SUBSCRIBE_TO = [
+        RTC_TOPIC['MULTIPLE_STATE'],
+        RTC_TOPIC['SPORT_MOD_STATE'],
+        RTC_TOPIC['LOW_STATE'],
+        RTC_TOPIC['ULIDAR'],
+        RTC_TOPIC['ULIDAR_ARRAY'],
+        RTC_TOPIC['ULIDAR_STATE'],
+        RTC_TOPIC['ROBOTODOM'],
+    ]
+
+    receive_video = True
+    receive_lidar = False
+    receive_robot_data = True
+    subscribed_topics = TOPICS_TO_SUBSCRIBE_TO
 
     # async def on_video_track(track: MediaStreamTrack):
     #     print(f"Video track received: {track}")
@@ -556,7 +591,17 @@ if __name__ == "__main__":
         async def on_robot_data(robot_data: RobotData):
             pass
 
-        asyncio.run(main(relay_url=args.api, config=config, on_robot_data=on_robot_data, on_video_track=on_video_track, on_lidar_update=on_lidar_update))
+        asyncio.run(main(
+            relay_url=args.api, 
+            config=config, 
+            on_robot_data=on_robot_data, 
+            on_video_track=on_video_track, 
+            on_lidar_update=on_lidar_update,
+            receive_video=receive_video,
+            receive_lidar=receive_lidar,
+            receive_robot_data=receive_robot_data,
+            subscribed_topics=subscribed_topics
+        ))
         # finally:
         #     if ff:
         #         ff.close()
