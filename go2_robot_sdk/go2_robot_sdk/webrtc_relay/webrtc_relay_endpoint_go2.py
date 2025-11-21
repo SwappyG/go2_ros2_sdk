@@ -6,6 +6,7 @@ import json
 import logging
 from pydantic import BaseModel
 import typing as t  # pyright: ignore[reportUnusedImport]
+import os
 
 from go2_robot_sdk.domain.constants.webrtc_topics import RTC_TOPIC
 from go2_robot_sdk.infrastructure.webrtc.go2_connection import Go2Connection, RobotData
@@ -141,11 +142,15 @@ async def connect(args: ConnectArgs, state: WebRTCRelayAppState = Depends(get_ap
         logger.info(f"GO2 connection established (state: {go2.pc.connectionState}), starting stats monitor")
     
     # Start WebRTC stats monitoring for GO2→Relay connection
-    import os
+    enable_stats = os.getenv("ENABLE_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
     debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
-    go2_stats_monitor = WebRTCStatsMonitor("GO2→RELAY", go2.pc, debug=debug_stats)
-    await go2_stats_monitor.start(interval_seconds=5.0)
-    state.go2_stats_monitor = go2_stats_monitor
+    
+    if enable_stats:
+        go2_stats_monitor = WebRTCStatsMonitor("GO2→RELAY", go2.pc, debug=debug_stats)
+        await go2_stats_monitor.start(interval_seconds=5.0)
+        state.go2_stats_monitor = go2_stats_monitor
+    else:
+        logger.info("WebRTC stats monitoring disabled")
     
     return ConnectReply(robot_ip=args.robot_ip)
 

@@ -3,6 +3,7 @@ from fastapi import Depends, APIRouter
 import logging
 from pydantic import BaseModel
 import typing as t
+import os
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import get_app_state, WebRTCRelayAppState
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
@@ -83,17 +84,21 @@ async def offer(
 
         # Start WebRTC stats monitoring for relay→client connection
         # This monitors RELAY→CLIENT (relay sending to client)
-        import os
+        enable_stats = os.getenv("ENABLE_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
         debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
-        stats_monitor_relay_to_client = WebRTCStatsMonitor("RELAY→CLIENT", new_relay_peer_connection, debug=debug_stats)
-        await stats_monitor_relay_to_client.start(interval_seconds=5.0)
-        state.relay_stats_monitor = stats_monitor_relay_to_client
         
-        # Also monitor CLIENT→RELAY (relay receiving from client)
-        # The relay's peer connection receives from client, so we can get RTT from remote-inbound-rtp
-        stats_monitor_client_to_relay = WebRTCStatsMonitor("CLIENT→RELAY", new_relay_peer_connection, debug=debug_stats)
-        await stats_monitor_client_to_relay.start(interval_seconds=5.0)
-        state.client_to_relay_stats_monitor = stats_monitor_client_to_relay
+        if enable_stats:
+            stats_monitor_relay_to_client = WebRTCStatsMonitor("RELAY→CLIENT", new_relay_peer_connection, debug=debug_stats)
+            await stats_monitor_relay_to_client.start(interval_seconds=5.0)
+            state.relay_stats_monitor = stats_monitor_relay_to_client
+            
+            # Also monitor CLIENT→RELAY (relay receiving from client)
+            # The relay's peer connection receives from client, so we can get RTT from remote-inbound-rtp
+            stats_monitor_client_to_relay = WebRTCStatsMonitor("CLIENT→RELAY", new_relay_peer_connection, debug=debug_stats)
+            await stats_monitor_client_to_relay.start(interval_seconds=5.0)
+            state.client_to_relay_stats_monitor = stats_monitor_client_to_relay
+        else:
+            logger.info("WebRTC stats monitoring disabled")
 
         # Re-trigger video to push fresh SPS/PPS for new subscriber
         try:

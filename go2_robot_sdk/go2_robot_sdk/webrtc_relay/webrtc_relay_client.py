@@ -11,6 +11,7 @@ import typing as t
 import sys
 import json
 import base64
+import os
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import ConnectArgs
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import OfferArgs, OfferReply
@@ -395,10 +396,15 @@ class WebRTCRelayClient:
         await peer.setRemoteDescription(RTCSessionDescription(sdp=answer.sdp, type=answer.type))
         
         # Start WebRTC stats monitoring for client→relay connection
-        import os
+        enable_stats = os.getenv("ENABLE_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
         debug_stats = os.getenv("DEBUG_WEBRTC_STATS", "false").lower() in ("true", "1", "yes")
-        self._stats_monitor = WebRTCStatsMonitor("CLIENT→RELAY", peer, debug=debug_stats)
-        await self._stats_monitor.start(interval_seconds=5.0)
+        
+        if enable_stats:
+            self._stats_monitor = WebRTCStatsMonitor("CLIENT→RELAY", peer, debug=debug_stats)
+            await self._stats_monitor.start(interval_seconds=5.0)
+        else:
+            logger.info("WebRTC stats monitoring disabled")
+            self._stats_monitor = None
         
         return peer, peer_datachannel
           
