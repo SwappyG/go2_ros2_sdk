@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QSplitter, QDoubleSpinBox, QSpinBox
 )
 from PySide6 import QtCore, QtWidgets
-from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QThread
 from PySide6.QtGui import QKeyEvent, QFocusEvent
 
 from aiortc import MediaStreamTrack  # type: ignore
@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 class RobotControlSignals(QObject):
     """Qt signals for thread-safe updates from async callbacks."""
     video_frame_ready = Signal(np.ndarray)
-    lidar_update = Signal(np.ndarray, int, float, tuple)
+    lidar_update = Signal(np.ndarray, int, float, tuple)  # positions, face_count, resolution, origin
+    lidar_mesh_update = Signal(object)  # Open3D TriangleMesh
     odometry_update = Signal(dict, dict)
     connection_status = Signal(bool)
     status_message = Signal(str)
@@ -266,6 +267,12 @@ class GO2GuiClient(QMainWindow):
         self._lidar_update_timer.timeout.connect(self._process_latest_lidar_frame)
         self._lidar_update_timer.setInterval(5000)  # 5000 ms = 0.2 Hz
         self._lidar_update_timer.start()
+        
+        # Lidar processing thread (not asyncio)
+        self.lidar_processing_thread = LidarProcessingThread(self)
+        self.lidar_processing_thread.processed_data_ready.connect(self.on_lidar_data_processed)
+        self.lidar_processing_thread.processed_mesh_ready.connect(self.on_lidar_mesh_processed)
+        self.lidar_processing_thread.start()
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -301,7 +308,7 @@ class GO2GuiClient(QMainWindow):
         
         self.video_widget = VideoWidget()
         # Use VTK for embedded 3D visualization (fallback to Open3D button if VTK not available)
-        self.lidar_widget = LidarWidget(use_voxel_viewer=False, use_vtk=True)
+        self.lidar_widget = LidarWidget()
         
         left_layout.addWidget(self.video_widget, stretch=2)
         left_layout.addWidget(self.lidar_widget, stretch=1)
@@ -600,23 +607,21 @@ class GO2GuiClient(QMainWindow):
             logger.warning(f"Video stream error: {e}")
     
     def handle_lidar_frame(self, lidar_frame: dict[str, t.Any]):
-        """Handle lidar data updates."""
-        try:
-            dec = lidar_frame["decoded_data"]
-            meta = lidar_frame["data"]
-            
-            positions = dec["positions"]
-            face_count = int(dec["face_count"])
-            resolution = float(meta["resolution"])
-            origin = tuple(meta["origin"])
-            
-            self.signals.lidar_update.emit(positions, face_count, resolution, origin)
-        except Exception as e:
-            logger.warning(f"Failed to handle lidar frame: {e}")
+        """Handle lidar data updates - queue to processing thread."""
+        # Queue frame to processing thread (non-blocking)
+        self.lidar_processing_thread.queue_lidar_frame(lidar_frame)
+    
+    def on_lidar_data_processed(self, positions: npt.NDArray[np.uint8], face_count: int, resolution: float, origin: tuple[float, float, float]):
+        """Update lidar widget with processed voxel data (called from processing thread via signal)."""
+        self.lidar_widget.update_lidar_data(positions, face_count, resolution, origin)
+    
+    def on_lidar_mesh_processed(self, mesh):
+        """Update lidar widget with processed Open3D mesh (called from processing thread via signal)."""
+        self.lidar_widget.update_lidar_mesh(mesh)
     
     def on_lidar_update(self, positions: npt.NDArray[np.uint8], face_count: int, resolution: float, origin: tuple[float, float, float]):
-        """Update lidar widget."""
-        self.lidar_widget.update_lidar_data(positions, face_count, resolution, origin)
+        """Update lidar widget (legacy signal handler - delegates to processed data handler)."""
+        self.on_lidar_data_processed(positions, face_count, resolution, origin)
     
     def update_latest_lidar_frame(self, lidar_frame: dict[str, t.Any]) -> None:
         """Store the most recent lidar frame (called on GUI thread)."""
@@ -627,10 +632,10 @@ class GO2GuiClient(QMainWindow):
         if self._latest_lidar_frame is None:
             return
         try:
-            # reuse existing handler to decode & emit signals
-            self.handle_lidar_frame(self._latest_lidar_frame)
+            # Queue to processing thread instead of processing directly
+            self.lidar_processing_thread.queue_lidar_frame(self._latest_lidar_frame)
         except Exception as e:
-            logger.warning(f"Failed to process latest lidar frame: {e}")
+            logger.warning(f"Failed to queue lidar frame for processing: {e}")
         finally:
             # clear buffer so we only process new incoming frames next tick
             self._latest_lidar_frame = None
@@ -650,12 +655,9 @@ class GO2GuiClient(QMainWindow):
         if self.video_task and not self.video_task.done():
             self.video_task.cancel()
         
-        # Close VoxelMapViewer if active
-        if hasattr(self.lidar_widget, '_viewer_started') and self.lidar_widget._viewer_started:  # pyright: ignore[reportPrivateUsage]
-            try:
-                self.lidar_widget.stop_voxel_viewer()
-            except Exception as e:
-                logger.warning(f"Error closing VoxelMapViewer: {e}")
+        # Stop lidar processing thread
+        if hasattr(self, 'lidar_processing_thread'):
+            self.lidar_processing_thread.stop()
         
         # Disconnect client synchronously
         # if self.client:
@@ -677,6 +679,96 @@ class GO2GuiClient(QMainWindow):
     #             self.client = None
     #     except Exception as e:
     #         logger.warning(f"Error during cleanup: {e}")
+
+class LidarProcessingThread(QThread):
+    """Thread for processing lidar data in background (not asyncio)."""
+    
+    # Signals emitted from this thread
+    processed_data_ready = Signal(np.ndarray, int, float, tuple)  # positions, face_count, resolution, origin
+    processed_mesh_ready = Signal(object)  # Open3D TriangleMesh
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._lidar_frame_queue: list[dict[str, t.Any] | None] = [None]  # Single-item queue
+        self._running = True
+        
+    def queue_lidar_frame(self, lidar_frame: dict[str, t.Any]):
+        """Queue a lidar frame for processing (called from GUI thread)."""
+        self._lidar_frame_queue[0] = lidar_frame
+    
+    def stop(self):
+        """Stop the processing thread."""
+        self._running = False
+        self.wait()
+    
+    def run(self):
+        """Process lidar frames in background thread."""
+        try:
+            import open3d as o3d
+            from go2_robot_sdk.webrtc_relay.voxel_map_viewer import (
+                _positions_u8_to_world_points, _triangles_from_faces
+            )
+        except ImportError as e:
+            logger.error(f"Failed to import required modules for lidar processing: {e}")
+            return
+        
+        while self._running:
+            # Check for new lidar frame
+            lidar_frame = self._lidar_frame_queue[0]
+            if lidar_frame is None:
+                self.msleep(10)  # Sleep 10ms if no data
+                continue
+            
+            # Clear queue immediately
+            self._lidar_frame_queue[0] = None
+            
+            try:
+                # Extract data from frame
+                dec = lidar_frame.get("decoded_data", {})
+                meta = lidar_frame.get("data", {})
+                
+                positions = dec.get("positions")
+                face_count = int(dec.get("face_count", 0))
+                resolution = float(meta.get("resolution", 0.01))
+                origin = tuple(meta.get("origin", (0.0, 0.0, 0.0)))
+                
+                if positions is None or face_count == 0:
+                    continue
+                
+                # Option 1: Emit raw voxel data (for direct VTK rendering)
+                self.processed_data_ready.emit(positions, face_count, resolution, origin)
+                
+                # Option 2: Generate Open3D mesh and emit
+                try:
+                    # Convert positions to world points
+                    world_points = _positions_u8_to_world_points(
+                        positions, resolution, origin
+                    )
+                    
+                    # Generate triangles from faces
+                    triangles = _triangles_from_faces(face_count, flip_winding=False)
+                    
+                    # Create Open3D mesh
+                    mesh = o3d.geometry.TriangleMesh()
+                    mesh.vertices = o3d.utility.Vector3dVector(world_points)
+                    mesh.triangles = o3d.utility.Vector3iVector(triangles)
+                    
+                    # Compute normals for better visualization
+                    mesh.compute_vertex_normals()
+                    
+                    # Emit mesh
+                    self.processed_mesh_ready.emit(mesh)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to generate Open3D mesh: {e}")
+                    # Continue even if mesh generation fails
+                
+            except Exception as e:
+                logger.warning(f"Failed to process lidar frame in thread: {e}")
+            
+            # Small sleep to prevent busy-waiting
+            self.msleep(5)
+
 
 class GuiInvoker(QtCore.QObject):
     """Helper to run functions that originate from threads back onto main GUI thread"""
