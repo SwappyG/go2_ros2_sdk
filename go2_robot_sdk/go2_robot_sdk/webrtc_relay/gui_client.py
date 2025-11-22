@@ -6,6 +6,7 @@ import asyncio
 import argparse
 import logging
 import typing as t
+from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QThread
-from PySide6.QtGui import QKeyEvent, QFocusEvent
+from PySide6.QtGui import QKeyEvent, QFocusEvent, QPixmap
 
 from aiortc import MediaStreamTrack  # type: ignore
 
@@ -295,9 +296,31 @@ class GO2GuiClient(QMainWindow):
         # Main layout
         main_layout = QVBoxLayout()
         
-        # Status bar at top
+        # Top bar with logo and status
+        top_bar_layout = QHBoxLayout()
+        
+        # Logo at top left
+        logo_label = QLabel()
+        logo_path = Path(__file__).parent / "logo.png"
+        if logo_path.exists():
+            pixmap = QPixmap(str(logo_path))
+            # Scale logo to reasonable size (e.g., max height 60px)
+            scaled_pixmap = pixmap.scaledToHeight(60, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+        else:
+            logo_label.setText("Logo")
+            logo_label.setStyleSheet("QLabel { color: #888; }")
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        top_bar_layout.addWidget(logo_label)
+        
+        # Add stretch to push status to the right
+        top_bar_layout.addStretch()
+        
+        # Status bar at top right
         self.status_widget = StatusWidget()
-        main_layout.addWidget(self.status_widget)
+        top_bar_layout.addWidget(self.status_widget)
+        
+        main_layout.addLayout(top_bar_layout)
         
         # Content area
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
