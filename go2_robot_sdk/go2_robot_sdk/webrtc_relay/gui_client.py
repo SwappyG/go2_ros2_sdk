@@ -28,6 +28,8 @@ from go2_robot_sdk.webrtc_relay.gui_widgets import (
 )
 import json
 from pathlib import Path
+from collections import deque
+from datetime import datetime
 from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, QtInputAdapter
 
 logging.basicConfig(
@@ -44,6 +46,107 @@ class RobotControlSignals(QObject):
     odometry_update = Signal(dict, dict)
     connection_status = Signal(bool)
     status_message = Signal(str)
+    console_message = Signal(str)
+
+
+class ConsoleWidget(QWidget):
+    """Console widget for displaying robot data messages."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.message_queue = deque(maxlen=25)
+        self._pending_update = False
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize the console UI."""
+        layout = QVBoxLayout()
+        
+        # Console text area
+        self.console_text = QTextEdit()
+        self.console_text.setReadOnly(True)
+        self.console_text.setStyleSheet("""
+            QTextEdit {
+                color: #00ff00;
+                background-color: #1e1e1e;
+                border: 1px solid #555;
+                font-family: 'Courier New', monospace;
+                font-size: 9pt;
+            }
+        """)
+        layout.addWidget(self.console_text)
+        
+        # Copy button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.btn_copy = QPushButton("Copy All")
+        self.btn_copy.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border: 2px solid #555;
+                border-radius: 5px;
+                padding: 5px 15px;
+                font-size: 9pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+                border-color: #777;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+        """)
+        self.btn_copy.clicked.connect(self.copy_all)
+        button_layout.addWidget(self.btn_copy)
+        layout.addLayout(button_layout)
+        
+        # Timer for rate-limited GUI updates (every 2 seconds)
+        self.update_timer = QTimer()
+        self.update_timer.setInterval(2000)  # 2 seconds
+        self.update_timer.timeout.connect(self._update_display)
+        self.update_timer.setSingleShot(False)
+        
+        self.setLayout(layout)
+    
+    def add_message(self, message: str):
+        """Add a message to the console with timestamp."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_message = f"[{timestamp}] {message}"
+        
+        # Add to queue immediately (automatically limits to 25)
+        self.message_queue.append(formatted_message)
+        
+        # Mark that we have pending updates
+        self._pending_update = True
+        
+        # Start the timer if it's not already running
+        if not self.update_timer.isActive():
+            self.update_timer.start()
+            # Also do an immediate update for the first message
+            self._update_display()
+    
+    def _update_display(self):
+        """Update the GUI display with current queue contents."""
+        if not self._pending_update:
+            return
+        
+        # Update text widget with all messages
+        self.console_text.clear()
+        self.console_text.setPlainText("\n".join(self.message_queue))
+        
+        # Auto-scroll to bottom to show latest message
+        scrollbar = self.console_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
+        self._pending_update = False
+    
+    def copy_all(self):
+        """Copy all console text to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText("\n".join(self.message_queue))
+        logger.info("Console output copied to clipboard")
 
 
 class ControlPanel(QWidget):
@@ -481,11 +584,13 @@ class GO2GuiClient(QMainWindow):
         # Create settings widget (need to access it from control_panel)
         settings_widget = self.control_panel._create_settings_widget()
         self.odometry_widget = OdometryWidget()
+        self.console_widget = ConsoleWidget()
         
-        # Bottom tab widget for Settings and Odometry
+        # Bottom tab widget for Settings, Odometry, and Console
         bottom_tabs = QTabWidget()
         bottom_tabs.addTab(settings_widget, "Settings")
         bottom_tabs.addTab(self.odometry_widget, "Odometry")
+        bottom_tabs.addTab(self.console_widget, "Console")
         
         # Style the bottom tab widget
         bottom_tabs.setStyleSheet("""
@@ -618,6 +723,7 @@ class GO2GuiClient(QMainWindow):
         self.signals.odometry_update.connect(self.on_odometry_update)
         self.signals.connection_status.connect(self.status_widget.set_connected)
         self.signals.status_message.connect(self.status_widget.set_info)
+        self.signals.console_message.connect(self.console_widget.add_message)
     
     def keyPressEvent(self, event: QKeyEvent):
         """Handle keyboard input using keyboard command handler."""
@@ -859,11 +965,43 @@ class GO2GuiClient(QMainWindow):
     def handle_robot_data(self, robot_data: RobotData):
         """Handle robot data updates."""
         try:
-            if robot_data and robot_data.odometry_data:
+            if not robot_data:
+                return
+            
+            # Handle odometry data
+            if robot_data.odometry_data:
                 self.signals.odometry_update.emit(
                     robot_data.odometry_data.position,
                     robot_data.odometry_data.orientation
                 )
+            
+            # Handle other robot data fields (non-odometry)
+            # Get all attributes of robot_data that are not private/internal
+            robot_data_attrs = [attr for attr in dir(robot_data) 
+                              if not attr.startswith('_') and attr != 'odometry_data']
+            
+            for attr_name in robot_data_attrs:
+                try:
+                    attr_value = getattr(robot_data, attr_name, None)
+                    if attr_value is not None:
+                        # Format the data for display
+                        try:
+                            # Try to convert to JSON if it's a complex object
+                            if isinstance(attr_value, (dict, list)):
+                                formatted_data = json.dumps(attr_value, indent=2, default=str)
+                            else:
+                                formatted_data = str(attr_value)
+                            
+                            # Create message with field name and data
+                            message = f"{attr_name}: {formatted_data}"
+                            self.signals.console_message.emit(message)
+                        except Exception as e:
+                            # Fallback to simple string representation
+                            message = f"{attr_name}: {str(attr_value)}"
+                            self.signals.console_message.emit(message)
+                except Exception as e:
+                    logger.debug(f"Failed to process attribute {attr_name}: {e}")
+                    
         except Exception as e:
             logger.warning(f"Failed to handle robot data: {e}")
     
