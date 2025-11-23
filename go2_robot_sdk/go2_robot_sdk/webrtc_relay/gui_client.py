@@ -573,7 +573,7 @@ class GO2GuiClient(QMainWindow):
         # Content area
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Left panel: Video and Lidar
+        # Left panel: Video and Lidar in tabs
         left_panel = QWidget()
         left_layout = QVBoxLayout()
         
@@ -581,8 +581,34 @@ class GO2GuiClient(QMainWindow):
         # Use VTK for embedded 3D visualization (fallback to Open3D button if VTK not available)
         self.lidar_widget = LidarWidget()
         
-        left_layout.addWidget(self.video_widget, stretch=2)
-        left_layout.addWidget(self.lidar_widget, stretch=1)
+        # Create tab widget for video and lidar
+        video_lidar_tabs = QTabWidget()
+        video_lidar_tabs.addTab(self.video_widget, "Video")
+        video_lidar_tabs.addTab(self.lidar_widget, "Lidar")
+        video_lidar_tabs.setCurrentIndex(0)  # Set video as default tab
+        
+        # Style the tab widget
+        video_lidar_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #3a3a3a;
+                color: white;
+                padding: 8px 16px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #555;
+            }
+            QTabBar::tab:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+        
+        left_layout.addWidget(video_lidar_tabs)
         left_panel.setLayout(left_layout)
         
         # Right panel: Controls and Odometry with tabs
