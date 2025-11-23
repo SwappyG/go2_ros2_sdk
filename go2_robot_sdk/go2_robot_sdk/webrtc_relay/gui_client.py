@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
-from PySide6.QtGui import QKeyEvent, QFocusEvent
+from PySide6.QtGui import QKeyEvent, QFocusEvent, QPixmap
 
 from aiortc import MediaStreamTrack  # type: ignore
 
@@ -24,7 +24,7 @@ from go2_robot_sdk.domain.entities.robot_config import RobotConfig
 from go2_robot_sdk.domain.entities.robot_data import RobotData
 from go2_robot_sdk.webrtc_relay.webrtc_relay_client import WebRTCRelayClient
 from go2_robot_sdk.webrtc_relay.gui_widgets import (
-    VideoWidget, LidarWidget, OdometryWidget, StatusWidget
+    VideoWidget, LidarWidget, OdometryWidget
 )
 import json
 from pathlib import Path
@@ -556,9 +556,19 @@ class GO2GuiClient(QMainWindow):
         # Main layout
         main_layout = QVBoxLayout()
         
-        # Status bar at top
-        self.status_widget = StatusWidget()
-        main_layout.addWidget(self.status_widget)
+        # Header with logo at top left
+        header_layout = QHBoxLayout()
+        logo_path = Path(__file__).parent / "logo.png"
+        if logo_path.exists():
+            logo_label = QLabel()
+            pixmap = QPixmap(str(logo_path))
+            # Scale logo to reasonable size (e.g., max height 60px)
+            scaled_pixmap = pixmap.scaled(200, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+            logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            header_layout.addWidget(logo_label)
+        header_layout.addStretch()
+        main_layout.addLayout(header_layout)
         
         # Content area
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -625,36 +635,6 @@ class GO2GuiClient(QMainWindow):
         
         main_layout.addWidget(content_splitter)
         
-        # Connection controls at bottom
-        connection_layout = QHBoxLayout()
-        self.btn_connect = QPushButton("Connect")
-        self.btn_disconnect = QPushButton("Disconnect")
-        self.btn_connect.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                padding: 10px;
-                font-weight: bold;
-                border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #34ce57; }
-        """)
-        self.btn_disconnect.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                padding: 10px;
-                font-weight: bold;
-                border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #e04555; }
-        """)
-        self.btn_disconnect.setEnabled(False)
-        
-        connection_layout.addWidget(self.btn_connect)
-        connection_layout.addWidget(self.btn_disconnect)
-        main_layout.addLayout(connection_layout)
-        
         central_widget.setLayout(main_layout)
 
     def add_client(self, client: WebRTCRelayClient):
@@ -713,16 +693,10 @@ class GO2GuiClient(QMainWindow):
         # JSON command button
         self.control_panel.btn_send_json.clicked.connect(self.on_send_json_command)
         
-        # Connection buttons
-        self.btn_connect.clicked.connect(self.on_connect)
-        self.btn_disconnect.clicked.connect(self.on_disconnect)
-        
         # Data update signals
         self.signals.video_frame_ready.connect(self.video_widget.update_frame)
         self.signals.lidar_update.connect(self.on_lidar_update)
         self.signals.odometry_update.connect(self.on_odometry_update)
-        self.signals.connection_status.connect(self.status_widget.set_connected)
-        self.signals.status_message.connect(self.status_widget.set_info)
         self.signals.console_message.connect(self.console_widget.add_message)
     
     def keyPressEvent(self, event: QKeyEvent):
@@ -802,8 +776,6 @@ class GO2GuiClient(QMainWindow):
             
             self.signals.connection_status.emit(False)
             self.signals.status_message.emit("Disconnected")
-            self.btn_connect.setEnabled(True)
-            self.btn_disconnect.setEnabled(False)
             
         except Exception as e:
             logger.error(f"Disconnect failed: {e}")
