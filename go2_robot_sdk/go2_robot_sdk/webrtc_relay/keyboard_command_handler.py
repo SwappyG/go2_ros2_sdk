@@ -17,7 +17,6 @@ from PySide6.QtGui import QKeyEvent
 if TYPE_CHECKING:
     from go2_robot_sdk.webrtc_relay.webrtc_relay_client import WebRTCRelayClient
 
-from go2_robot_sdk.webrtc_relay.gui_configurations import GuiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +172,7 @@ class KeyboardCommandHandler:
             ValueError: If config is invalid
         """
         if not os.path.exists(config_path):
-            logger.warning(f"Config file not found at {config_path}, using defaults from GuiConfig")
+            logger.warning(f"Config file not found at {config_path}, using hardcoded defaults")
             return self._get_default_config()
         
         try:
@@ -194,7 +193,7 @@ class KeyboardCommandHandler:
         return config
     
     def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration from GuiConfig."""
+        """Get default configuration (hardcoded defaults)."""
         return {
             "key_bindings": {
                 "forward": {"qt": "Key_W", "terminal": "w"},
@@ -207,12 +206,12 @@ class KeyboardCommandHandler:
                 "quit": {"qt": "Key_P", "terminal": "q"}
             },
             "velocity": {
-                "linear": GuiConfig.INITIAL_LINEAR_VELOCITY,
-                "rotation": GuiConfig.INITIAL_ROTATION_VELOCITY
+                "linear": 0.25,
+                "rotation": 0.50
             },
             "ramp": {
-                "ramp_time_ms": GuiConfig.VELOCITY_RAMP_TIME_MS,
-                "update_interval_ms": GuiConfig.MOVEMENT_UPDATE_INTERVAL_MS,
+                "ramp_time_ms": 1000,
+                "update_interval_ms": 50,
                 "ramp_update_interval_ms": 20
             }
         }
@@ -548,4 +547,20 @@ class KeyboardCommandHandler:
     def create_terminal_adapter(self) -> TerminalInputAdapter:
         """Create and return a terminal input adapter."""
         return TerminalInputAdapter(self)
+    
+    def get_linear_velocity(self) -> float:
+        """Get the configured linear velocity."""
+        return self.config["velocity"]["linear"]
+    
+    def get_rotation_velocity(self) -> float:
+        """Get the configured rotation velocity."""
+        return self.config["velocity"]["rotation"]
+    
+    def get_ramp_time_ms(self) -> int:
+        """Get the configured velocity ramp time in milliseconds."""
+        return self.config["ramp"]["ramp_time_ms"]
+    
+    def get_update_interval_ms(self) -> int:
+        """Get the configured movement update interval in milliseconds."""
+        return self.config["ramp"]["update_interval_ms"]
 

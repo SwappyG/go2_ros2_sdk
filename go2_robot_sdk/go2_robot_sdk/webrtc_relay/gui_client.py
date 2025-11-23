@@ -12,7 +12,7 @@ import numpy.typing as npt
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QGridLayout, QGroupBox, QLabel, QLineEdit, QCheckBox,  # pyright: ignore[reportUnusedImport]
-    QSplitter, QDoubleSpinBox, QSpinBox
+    QSplitter, QDoubleSpinBox, QSpinBox, QTextEdit, QTabWidget
 )
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
@@ -26,7 +26,8 @@ from go2_robot_sdk.webrtc_relay.webrtc_relay_client import WebRTCRelayClient
 from go2_robot_sdk.webrtc_relay.gui_widgets import (
     VideoWidget, LidarWidget, OdometryWidget, StatusWidget
 )
-from go2_robot_sdk.webrtc_relay.gui_configurations import GuiConfig
+import json
+from pathlib import Path
 from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, QtInputAdapter
 
 logging.basicConfig(
@@ -52,24 +53,21 @@ class ControlPanel(QWidget):
         super().__init__(parent)
         self.init_ui()
     
-    def init_ui(self):
-        layout = QVBoxLayout()
-        
-        # Movement controls
-        movement_group = QGroupBox("Movement Controls")
-        movement_layout = QGridLayout()
-        
-        # Create movement buttons (using configurable key bindings)
-        self.btn_forward = QPushButton("↑ Forward (W)")
-        self.btn_backward = QPushButton("↓ Backward (S)")
-        self.btn_strafe_left = QPushButton("← Strafe Left (Q)")
-        self.btn_strafe_right = QPushButton("→ Strafe Right (E)")
-        self.btn_rotate_left = QPushButton("⟲ Rotate Left (A)")
-        self.btn_rotate_right = QPushButton("⟳ Rotate Right (D)")
-        self.btn_stop = QPushButton("⏹ Stop (Space)")
-        
-        # Style buttons
-        button_style = """
+    def _load_config_value(self, section: str, key: str, default: t.Any) -> t.Any:
+        """Load a value from keyboard_config.json, with fallback to default."""
+        try:
+            config_path = Path(__file__).parent / "keyboard_config.json"
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    return config.get(section, {}).get(key, default)
+        except Exception as e:
+            logger.warning(f"Failed to load config value {section}.{key}: {e}")
+        return default
+    
+    def _get_button_style(self) -> str:
+        """Get the button style string."""
+        return """
             QPushButton {
                 background-color: #3a3a3a;
                 color: white;
@@ -87,6 +85,25 @@ class ControlPanel(QWidget):
                 background-color: #2a2a2a;
             }
         """
+    
+    def _create_movement_widget(self) -> QWidget:
+        """Create movement controls widget."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        movement_group = QGroupBox("Movement Controls")
+        movement_layout = QGridLayout()
+        
+        # Create movement buttons
+        self.btn_forward = QPushButton("↑ Forward (W)")
+        self.btn_backward = QPushButton("↓ Backward (S)")
+        self.btn_strafe_left = QPushButton("← Strafe Left (Q)")
+        self.btn_strafe_right = QPushButton("→ Strafe Right (E)")
+        self.btn_rotate_left = QPushButton("⟲ Rotate Left (A)")
+        self.btn_rotate_right = QPushButton("⟳ Rotate Right (D)")
+        self.btn_stop = QPushButton("⏹ Stop (Space)")
+        
+        button_style = self._get_button_style()
         
         for btn in [self.btn_forward, self.btn_backward, self.btn_strafe_left, 
                    self.btn_strafe_right, self.btn_rotate_left, self.btn_rotate_right, self.btn_stop]:
@@ -110,6 +127,34 @@ class ControlPanel(QWidget):
         
         movement_group.setLayout(movement_layout)
         layout.addWidget(movement_group)
+        layout.addStretch()
+        
+        # Apply dark theme to group box
+        group_style = """
+            QGroupBox {
+                color: white;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """
+        movement_group.setStyleSheet(group_style)
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def _create_posture_fun_widget(self) -> QWidget:
+        """Create posture and fun commands widget."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        button_style = self._get_button_style()
         
         # Posture controls
         posture_group = QGroupBox("Posture Controls")
@@ -134,7 +179,6 @@ class ControlPanel(QWidget):
         fun_layout = QVBoxLayout()
         
         self.btn_balance_stand = QPushButton("⚖️ Balance Stand")
-        
         self.btn_balance_stand.setStyleSheet(button_style)
         self.btn_balance_stand.setMinimumHeight(30)
         self.btn_balance_stand.setMaximumHeight(40)
@@ -143,7 +187,84 @@ class ControlPanel(QWidget):
         fun_group.setLayout(fun_layout)
         layout.addWidget(fun_group)
         
-        # Velocity and Settings
+        layout.addStretch()
+        
+        # Apply dark theme to group boxes
+        group_style = """
+            QGroupBox {
+                color: white;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """
+        posture_group.setStyleSheet(group_style)
+        fun_group.setStyleSheet(group_style)
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def _create_raw_commands_widget(self) -> QWidget:
+        """Create raw JSON commands widget."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        button_style = self._get_button_style()
+        
+        json_group = QGroupBox("JSON Command")
+        json_layout = QVBoxLayout()
+        
+        self.json_command_text = QTextEdit()
+        self.json_command_text.setPlaceholderText('Enter JSON command (e.g., {"type": "msg", "topic": "rt/api/sport/request", "data": {...}})')
+        self.json_command_text.setStyleSheet("QTextEdit { color: white; background-color: #3a3a3a; padding: 5px; border: 1px solid #555; }")
+        json_layout.addWidget(self.json_command_text)
+        
+        self.btn_send_json = QPushButton("Send JSON Command")
+        self.btn_send_json.setStyleSheet(button_style + """
+            QPushButton { background-color: #007bff; }
+            QPushButton:hover { background-color: #0056b3; }
+        """)
+        self.btn_send_json.setMinimumHeight(30)
+        self.btn_send_json.setMaximumHeight(40)
+        json_layout.addWidget(self.btn_send_json)
+        
+        json_group.setLayout(json_layout)
+        layout.addWidget(json_group)
+        layout.addStretch()
+        
+        # Apply dark theme to group box
+        group_style = """
+            QGroupBox {
+                color: white;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """
+        json_group.setStyleSheet(group_style)
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def _create_settings_widget(self) -> QWidget:
+        """Create settings widget."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        button_style = self._get_button_style()
+        
         avoid_group = QGroupBox("Settings")
         avoid_layout = QVBoxLayout()
         
@@ -172,7 +293,7 @@ class ControlPanel(QWidget):
         self.linear_velocity_spinbox = QDoubleSpinBox()
         self.linear_velocity_spinbox.setRange(0.0, 1.0)
         self.linear_velocity_spinbox.setSingleStep(0.1)
-        self.linear_velocity_spinbox.setValue(GuiConfig.INITIAL_LINEAR_VELOCITY)
+        self.linear_velocity_spinbox.setValue(self._load_config_value("velocity", "linear", 0.25))
         self.linear_velocity_spinbox.setDecimals(2)
         self.linear_velocity_spinbox.setStyleSheet("QDoubleSpinBox { color: white; background-color: #3a3a3a; padding: 5px; }")
         linear_velocity_layout.addWidget(self.linear_velocity_spinbox)
@@ -184,7 +305,7 @@ class ControlPanel(QWidget):
         self.rotation_velocity_spinbox = QDoubleSpinBox()
         self.rotation_velocity_spinbox.setRange(0.0, 1.0)
         self.rotation_velocity_spinbox.setSingleStep(0.1)
-        self.rotation_velocity_spinbox.setValue(GuiConfig.INITIAL_ROTATION_VELOCITY)
+        self.rotation_velocity_spinbox.setValue(self._load_config_value("velocity", "rotation", 0.50))
         self.rotation_velocity_spinbox.setDecimals(2)
         self.rotation_velocity_spinbox.setStyleSheet("QDoubleSpinBox { color: white; background-color: #3a3a3a; padding: 5px; }")
         rotation_velocity_layout.addWidget(self.rotation_velocity_spinbox)
@@ -196,7 +317,7 @@ class ControlPanel(QWidget):
         self.ramp_spinbox = QSpinBox()
         self.ramp_spinbox.setRange(0, 5000)
         self.ramp_spinbox.setSingleStep(100)
-        self.ramp_spinbox.setValue(GuiConfig.VELOCITY_RAMP_TIME_MS)
+        self.ramp_spinbox.setValue(self._load_config_value("ramp", "ramp_time_ms", 1000))
         self.ramp_spinbox.setSuffix(" ms")
         self.ramp_spinbox.setStyleSheet("QSpinBox { color: white; background-color: #3a3a3a; padding: 5px; }")
         ramp_layout.addWidget(self.ramp_spinbox)
@@ -204,11 +325,9 @@ class ControlPanel(QWidget):
         
         avoid_group.setLayout(avoid_layout)
         layout.addWidget(avoid_group)
-        
         layout.addStretch()
-        self.setLayout(layout)
         
-        # Apply dark theme to group boxes
+        # Apply dark theme to group box
         group_style = """
             QGroupBox {
                 color: white;
@@ -223,10 +342,44 @@ class ControlPanel(QWidget):
                 padding: 0 5px 0 5px;
             }
         """
-        movement_group.setStyleSheet(group_style)
-        posture_group.setStyleSheet(group_style)
-        fun_group.setStyleSheet(group_style)
         avoid_group.setStyleSheet(group_style)
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def init_ui(self):
+        """Initialize the control panel with tab widgets."""
+        layout = QVBoxLayout()
+        
+        # Top tab widget for commands
+        top_tabs = QTabWidget()
+        top_tabs.addTab(self._create_movement_widget(), "Movement")
+        top_tabs.addTab(self._create_posture_fun_widget(), "Posture/Fun")
+        top_tabs.addTab(self._create_raw_commands_widget(), "Raw Commands")
+        
+        # Style the tab widget
+        top_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #3a3a3a;
+                color: white;
+                padding: 8px 16px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #555;
+            }
+            QTabBar::tab:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+        
+        layout.addWidget(top_tabs)
+        self.setLayout(layout)
 
 
 class GO2GuiClient(QMainWindow):
@@ -251,7 +404,7 @@ class GO2GuiClient(QMainWindow):
         
         # Timer for continuous movement updates (will be connected to handler)
         self.move_timer = QTimer()
-        self.move_timer.setInterval(GuiConfig.MOVEMENT_UPDATE_INTERVAL_MS)
+        self.move_timer.setInterval(self._load_config_value("ramp", "update_interval_ms", 50))
         
         # Timer for velocity ramping (will be connected to handler)
         self.ramp_timer = QTimer()
@@ -266,6 +419,18 @@ class GO2GuiClient(QMainWindow):
         self._lidar_update_timer.timeout.connect(self._process_latest_lidar_frame)
         self._lidar_update_timer.setInterval(5000)  # 5000 ms = 0.2 Hz
         self._lidar_update_timer.start()
+    
+    def _load_config_value(self, section: str, key: str, default: t.Any) -> t.Any:
+        """Load a value from keyboard_config.json, with fallback to default."""
+        try:
+            config_path = Path(__file__).parent / "keyboard_config.json"
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    return config.get(section, {}).get(key, default)
+        except Exception as e:
+            logger.warning(f"Failed to load config value {section}.{key}: {e}")
+        return default
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -307,15 +472,44 @@ class GO2GuiClient(QMainWindow):
         left_layout.addWidget(self.lidar_widget, stretch=1)
         left_panel.setLayout(left_layout)
         
-        # Right panel: Controls and Odometry
+        # Right panel: Controls and Odometry with tabs
         right_panel = QWidget()
         right_layout = QVBoxLayout()
         
         self.control_panel = ControlPanel()
+        
+        # Create settings widget (need to access it from control_panel)
+        settings_widget = self.control_panel._create_settings_widget()
         self.odometry_widget = OdometryWidget()
         
+        # Bottom tab widget for Settings and Odometry
+        bottom_tabs = QTabWidget()
+        bottom_tabs.addTab(settings_widget, "Settings")
+        bottom_tabs.addTab(self.odometry_widget, "Odometry")
+        
+        # Style the bottom tab widget
+        bottom_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #3a3a3a;
+                color: white;
+                padding: 8px 16px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #555;
+            }
+            QTabBar::tab:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+        
         right_layout.addWidget(self.control_panel, stretch=2)
-        right_layout.addWidget(self.odometry_widget, stretch=1)
+        right_layout.addWidget(bottom_tabs, stretch=1)
         right_panel.setLayout(right_layout)
         
         # Add panels to splitter
@@ -410,6 +604,9 @@ class GO2GuiClient(QMainWindow):
         # Obstacle avoidance buttons
         self.control_panel.btn_enable_obstacle_avoid.clicked.connect(self.on_enable_obstacle_avoid)
         self.control_panel.btn_disable_obstacle_avoid.clicked.connect(self.on_disable_obstacle_avoid)
+        
+        # JSON command button
+        self.control_panel.btn_send_json.clicked.connect(self.on_send_json_command)
         
         # Connection buttons
         self.btn_connect.clicked.connect(self.on_connect)
@@ -507,24 +704,71 @@ class GO2GuiClient(QMainWindow):
     
     def on_stand_up(self):
         """Command robot to stand up."""
-        pass
-        # if self.client:
-        #     await self.client.stand_up()
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send stand_up command")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.stand_up(),
+                    loop
+                )
+                logger.info("Stand up command sent")
+            except Exception as e:
+                logger.warning(f"Failed to send stand_up command: {e}")
     
     def on_recovery_stand(self):
         """Command robot to recovery stand."""
-        # if self.client:
-        #     await self.client.recovery_stand()
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send recovery_stand command")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.recovery_stand(),
+                    loop
+                )
+                logger.info("Recovery stand command sent")
+            except Exception as e:
+                logger.warning(f"Failed to send recovery_stand command: {e}")
     
     def on_sit(self):
         """Command robot to sit."""
-        # if self.client:
-        #     await self.client.sit_on_hind_legs()
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send sit command")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.sit_on_hind_legs(),
+                    loop
+                )
+                logger.info("Sit command sent")
+            except Exception as e:
+                logger.warning(f"Failed to send sit command: {e}")
     
     def on_lie_down(self):
         """Command robot to lie down."""
-        # if self.client:
-        #     await self.client.lie_down_on_belly()
+        if self.client:
+            try:
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send lie_down command")
+                    return
+                
+                asyncio.run_coroutine_threadsafe(
+                    self.client.lie_down_on_belly(),
+                    loop
+                )
+                logger.info("Lie down command sent")
+            except Exception as e:
+                logger.warning(f"Failed to send lie_down command: {e}")
     
     def on_balance_stand(self):
         """Command robot to perform balance stand."""
@@ -575,6 +819,42 @@ class GO2GuiClient(QMainWindow):
                 logger.info("Disabled obstacle avoidance")
             except Exception as e:
                 logger.warning(f"Failed to disable obstacle avoidance: {e}")
+    
+    def on_send_json_command(self):
+        """Send JSON command to robot."""
+        if self.client:
+            try:
+                # Get JSON command from text box
+                json_text = self.control_panel.json_command_text.toPlainText().strip()
+                if not json_text:
+                    logger.warning("JSON command is empty")
+                    self.signals.status_message.emit("JSON command is empty")
+                    return
+                
+                # Validate JSON format
+                try:
+                    json.loads(json_text)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Invalid JSON format: {e}")
+                    self.signals.status_message.emit(f"Invalid JSON format: {e}")
+                    return
+                
+                loop = getattr(self.client, "_loop", None)
+                if loop is None:
+                    logger.warning("Client event loop not available; cannot send JSON command")
+                    self.signals.status_message.emit("Client not connected")
+                    return
+                
+                # Send command using threadsafe coroutine
+                asyncio.run_coroutine_threadsafe(
+                    self.client.send_json_command(json_text),
+                    loop
+                )
+                logger.info("JSON command sent successfully")
+                self.signals.status_message.emit("JSON command sent successfully")
+            except Exception as e:
+                logger.warning(f"Failed to send JSON command: {e}")
+                self.signals.status_message.emit(f"Failed to send JSON command: {e}")
     
     def handle_robot_data(self, robot_data: RobotData):
         """Handle robot data updates."""
