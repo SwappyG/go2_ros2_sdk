@@ -569,7 +569,7 @@ class GO2GuiClient(QMainWindow):
         
         self.video_widget = VideoWidget()
         # Use VTK for embedded 3D visualization (fallback to Open3D button if VTK not available)
-        self.lidar_widget = LidarWidget(use_voxel_viewer=False, use_vtk=True)
+        self.lidar_widget = LidarWidget()
         
         left_layout.addWidget(self.video_widget, stretch=2)
         left_layout.addWidget(self.lidar_widget, stretch=1)
