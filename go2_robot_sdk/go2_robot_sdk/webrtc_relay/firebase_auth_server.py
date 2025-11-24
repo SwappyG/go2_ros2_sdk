@@ -1,8 +1,8 @@
 """
 Firebase authentication for WebRTC relay server.
 
-This module provides server-side Firebase token verification and authorization.
-Only users in the authorized list can access the relay endpoints.
+This module provides server-side Firebase token verification.
+Any user with a valid Firebase token (exists in Firebase) is authorized to access the relay endpoints.
 """
 import os
 import logging
@@ -112,22 +112,20 @@ class FirebaseAuthConfig:
     
     def is_user_authorized(self, user_uid: str, user_email: Optional[str] = None) -> bool:
         """
-        Check if a user is in the authorized list.
+        Check if a user is authorized.
+        
+        Since we only check Firebase authentication, any user with a valid token
+        is considered authorized (they exist in Firebase).
         
         Args:
             user_uid: Firebase user UID
             user_email: Firebase user email (optional)
         
         Returns:
-            True if user is authorized, False otherwise
+            True (all authenticated Firebase users are authorized)
         """
-        if not self.authorized_users:
-            # If no authorized users list is set, allow all authenticated users
-            logger.warning("No authorized users list configured. All authenticated users will be allowed.")
-            return True
-        
-        # Check by UID or email
-        return user_uid in self.authorized_users or (user_email and user_email in self.authorized_users)
+        # If token is valid, user exists in Firebase and is authorized
+        return True
 
 
 # Global Firebase auth config (will be initialized at startup)
@@ -231,15 +229,8 @@ async def verify_firebase_token(
                 detail="Invalid token: missing user UID"
             )
         
-        # Check if user is authorized
-        if not config.is_user_authorized(user_uid, user_email):
-            logger.warning(f"Unauthorized access attempt by user: {user_uid} ({user_email})")
-            raise HTTPException(
-                status_code=403,
-                detail=f"User {user_uid} is not authorized to access this resource"
-            )
-        
-        logger.debug(f"Authenticated user: {user_uid} ({user_email})")
+        # If token is valid, user is authenticated and authorized (exists in Firebase)
+        logger.info(f"Authenticated user: {user_uid} ({user_email})")
         
         return {
             "uid": user_uid,
@@ -248,6 +239,9 @@ async def verify_firebase_token(
             "token_data": decoded_token,
         }
     
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 403 Forbidden) without modification
+        raise
     except ValueError as e:
         # Invalid token format
         logger.warning(f"Invalid Firebase token: {e}")

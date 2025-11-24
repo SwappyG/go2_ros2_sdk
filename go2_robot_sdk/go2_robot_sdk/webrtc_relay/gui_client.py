@@ -12,7 +12,7 @@ import numpy.typing as npt
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QGridLayout, QGroupBox, QLabel, QLineEdit, QCheckBox,  # pyright: ignore[reportUnusedImport]
-    QSplitter, QDoubleSpinBox, QSpinBox, QTextEdit, QTabWidget
+    QSplitter, QDoubleSpinBox, QSpinBox, QTextEdit, QTabWidget, QDialog
 )
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
@@ -28,16 +28,146 @@ from go2_robot_sdk.webrtc_relay.gui_widgets import (
     VideoWidget, LidarWidget, OdometryWidget
 )
 import json
+import os
+import requests
 from pathlib import Path
 from collections import deque
 from datetime import datetime
+from dotenv import load_dotenv
 from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, QtInputAdapter
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+class LoginDialog(QDialog):
+    """Simple login dialog for Firebase authentication."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("GO2 Robot - Login")
+        self.setModal(True)
+        self.setFixedSize(400, 200)
+        self.id_token = None
+        
+        layout = QVBoxLayout()
+        
+        # Title
+        title = QLabel("GO2 Robot Control")
+        title.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        
+        # Email field
+        email_layout = QHBoxLayout()
+        email_label = QLabel("Email:")
+        email_label.setFixedWidth(80)
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("Enter your email")
+        email_layout.addWidget(email_label)
+        email_layout.addWidget(self.email_input)
+        layout.addLayout(email_layout)
+        
+        # Password field
+        password_layout = QHBoxLayout()
+        password_label = QLabel("Password:")
+        password_label.setFixedWidth(80)
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter your password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        password_layout.addWidget(password_label)
+        password_layout.addWidget(self.password_input)
+        layout.addLayout(password_layout)
+        
+        # Error message label
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: red; font-size: 9pt;")
+        self.error_label.setWordWrap(True)
+        layout.addWidget(self.error_label)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.login_button = QPushButton("Login")
+        self.login_button.setDefault(True)
+        self.login_button.clicked.connect(self.authenticate)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.login_button)
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+        self.email_input.setFocus()
+        self.password_input.returnPressed.connect(self.authenticate)
+    
+    def authenticate(self):
+        """Authenticate with Firebase."""
+        email = self.email_input.text().strip()
+        password = self.password_input.text()
+        
+        if not email or not password:
+            self.error_label.setText("Please enter both email and password")
+            return
+        
+        # Disable button during authentication
+        self.login_button.setEnabled(False)
+        self.login_button.setText("Authenticating...")
+        self.error_label.setText("")
+        QApplication.processEvents()
+        
+        # Get Firebase API key
+        firebase_api_key = os.getenv("FIREBASE_API_KEY")
+        if not firebase_api_key:
+            self.error_label.setText("FIREBASE_API_KEY not configured")
+            self.login_button.setEnabled(True)
+            self.login_button.setText("Login")
+            return
+        
+        # Authenticate with Firebase
+        try:
+            response = requests.post(
+                f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_api_key}",
+                json={
+                    "email": email,
+                    "password": password,
+                    "returnSecureToken": True
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.id_token = data.get("idToken")
+                if self.id_token:
+                    self.accept()
+                else:
+                    self.error_label.setText("Authentication failed: No token received")
+                    self.login_button.setEnabled(True)
+                    self.login_button.setText("Login")
+            else:
+                error_data = response.json()
+                error_message = error_data.get("error", {}).get("message", "Authentication failed")
+                if "INVALID_PASSWORD" in error_message or "INVALID_EMAIL" in error_message:
+                    self.error_label.setText("Invalid email or password")
+                else:
+                    self.error_label.setText(f"Authentication failed: {error_message}")
+                self.login_button.setEnabled(True)
+                self.login_button.setText("Login")
+        except requests.exceptions.Timeout:
+            self.error_label.setText("Connection timeout. Please check your internet connection.")
+            self.login_button.setEnabled(True)
+            self.login_button.setText("Login")
+        except Exception as e:
+            logger.error(f"Authentication error: {e}")
+            self.error_label.setText(f"Error: {str(e)}")
+            self.login_button.setEnabled(True)
+            self.login_button.setText("Login")
 
 
 class RobotControlSignals(QObject):
@@ -1142,24 +1272,24 @@ def main():
     parser.add_argument("--firebase-password", default=None, help="Firebase password for user authentication")
     args = parser.parse_args()
     
-    # Initialize Firebase authentication if provided
-    firebase_auth_manager = None
-    if args.firebase_id_token or args.firebase_config or args.firebase_api_key:
-        firebase_auth_manager = FirebaseAuthManager(
-            firebase_id_token=args.firebase_id_token or os.getenv("FIREBASE_ID_TOKEN"),
-            firebase_config_path=args.firebase_config,
-            firebase_api_key=args.firebase_api_key,
-            firebase_email=args.firebase_email,
-            firebase_password=args.firebase_password,
-        )
-        if not firebase_auth_manager.is_authenticated():
-            logger.warning("Firebase authentication configured but no valid token available")
-        else:
-            logger.info("Firebase authentication enabled")
-    
-
-    # Create Qt application with async event loop
+    # Create Qt application
     app = QApplication(sys.argv)
+    
+    # Show login dialog first
+    login_dialog = LoginDialog()
+    if login_dialog.exec() != QDialog.DialogCode.Accepted:
+        logger.info("Login cancelled or failed - exiting")
+        sys.exit(0)
+    
+    # Get ID token from login
+    id_token = login_dialog.id_token
+    if not id_token:
+        logger.error("No ID token received from login")
+        sys.exit(1)
+    
+    # Create Firebase auth manager with the token
+    firebase_auth_manager = FirebaseAuthManager(firebase_id_token=id_token)
+    logger.info("Firebase authentication successful")
     window = GO2GuiClient(relay_url=args.api)
     invoker = GuiInvoker.make_invoker_on_gui_thread()
 
