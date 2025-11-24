@@ -23,6 +23,7 @@ from aiortc import MediaStreamTrack  # type: ignore
 from go2_robot_sdk.domain.entities.robot_config import RobotConfig
 from go2_robot_sdk.domain.entities.robot_data import RobotData
 from go2_robot_sdk.webrtc_relay.webrtc_relay_client import WebRTCRelayClient
+from go2_robot_sdk.webrtc_relay.firebase_auth import FirebaseAuthManager
 from go2_robot_sdk.webrtc_relay.gui_widgets import (
     VideoWidget, LidarWidget, OdometryWidget
 )
@@ -1129,11 +1130,32 @@ async def client_main(api, config, client, on_robot_data, on_video_track, on_lid
 
 def main():
     """Main entry point."""
+    import os
     parser = argparse.ArgumentParser(description="PyQt5 GUI client for GO2 robot")
     parser.add_argument("--api", default="http://localhost:8000", help="WebRTC relay server URL")
     parser.add_argument("--robot-ip", default="192.168.12.1", help="GO2 robot IP address")
     parser.add_argument("--token", default="", help="Robot authentication token")
+    parser.add_argument("--firebase-id-token", default=None, help="Firebase ID token for authentication (or set FIREBASE_ID_TOKEN env var)")
+    parser.add_argument("--firebase-config", default=None, help="Path to Firebase service account JSON file")
+    parser.add_argument("--firebase-api-key", default=None, help="Firebase API key for user authentication")
+    parser.add_argument("--firebase-email", default=None, help="Firebase email for user authentication")
+    parser.add_argument("--firebase-password", default=None, help="Firebase password for user authentication")
     args = parser.parse_args()
+    
+    # Initialize Firebase authentication if provided
+    firebase_auth_manager = None
+    if args.firebase_id_token or args.firebase_config or args.firebase_api_key:
+        firebase_auth_manager = FirebaseAuthManager(
+            firebase_id_token=args.firebase_id_token or os.getenv("FIREBASE_ID_TOKEN"),
+            firebase_config_path=args.firebase_config,
+            firebase_api_key=args.firebase_api_key,
+            firebase_email=args.firebase_email,
+            firebase_password=args.firebase_password,
+        )
+        if not firebase_auth_manager.is_authenticated():
+            logger.warning("Firebase authentication configured but no valid token available")
+        else:
+            logger.info("Firebase authentication enabled")
     
 
     # Create Qt application with async event loop
@@ -1193,6 +1215,7 @@ def main():
         on_robot_data=on_robot_data,
         on_video_track=on_video_track,
         on_lidar_frame=on_lidar_frame,
+        firebase_auth_manager=firebase_auth_manager,
     )
 
     window.add_client(client)

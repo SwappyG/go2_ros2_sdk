@@ -8,6 +8,7 @@ import os
 from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import get_app_state, WebRTCRelayAppState
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
+from go2_robot_sdk.webrtc_relay.firebase_auth_server import verify_firebase_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -50,7 +51,8 @@ def _on_datachannel(state: WebRTCRelayAppState, channel: RTCDataChannel):  # pyr
 @router.post("/offer", response_model=OfferReply)
 async def offer(
     sdp: OfferArgs,
-    state: WebRTCRelayAppState = Depends(get_app_state)
+    state: WebRTCRelayAppState = Depends(get_app_state),
+    user: dict = Depends(verify_firebase_token)
 ):
 
     if state.go2 is None:

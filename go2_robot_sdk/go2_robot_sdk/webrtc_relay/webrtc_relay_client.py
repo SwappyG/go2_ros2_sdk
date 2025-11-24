@@ -34,6 +34,7 @@ from go2_robot_sdk.domain.constants.robot_commands import ROBOT_CMD
 from go2_robot_sdk.application.utils import command_generator
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, TerminalInputAdapter
+from go2_robot_sdk.webrtc_relay.firebase_auth import FirebaseAuthManager, get_auth_headers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,10 +51,12 @@ class WebRTCRelayClient:
         on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]],
         on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
         on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
-        topics_to_subscribe_to: list[str] | None = None
+        topics_to_subscribe_to: list[str] | None = None,
+        firebase_auth_manager: FirebaseAuthManager | None = None
     ):
         self.url = relay_url
         self.robot_config = robot_config
+        self.firebase_auth_manager = firebase_auth_manager
         self.client = httpx.AsyncClient(timeout=60.0)
         self._on_robot_data = on_robot_data
         self._on_video_track = on_video_track
@@ -70,6 +73,10 @@ class WebRTCRelayClient:
     async def __aexit__(self, *args):
         await self.shutdown()
 
+    def _get_auth_headers(self) -> dict[str, str]:
+        """Get HTTP headers with Firebase authentication token."""
+        return get_auth_headers(self.firebase_auth_manager)
+    
     async def shutdown(self):
         # Stop stats monitoring
         if self._stats_monitor:
@@ -268,7 +275,11 @@ class WebRTCRelayClient:
         
         connect_args = ConnectArgs(**connect_args_dict)
 
-        r = await self.client.post(f"{self.url}/go2/connect", json=connect_args.model_dump())
+        r = await self.client.post(
+            f"{self.url}/go2/connect", 
+            json=connect_args.model_dump(),
+            headers=self._get_auth_headers()
+        )
 
         if r.status_code != 200:
             err_json = r.json()
@@ -279,7 +290,10 @@ class WebRTCRelayClient:
 
         # Sync client state with server subscriptions
         try:
-            r = await self.client.get(f"{self.url}/go2/subscriptions")
+            r = await self.client.get(
+                f"{self.url}/go2/subscriptions",
+                headers=self._get_auth_headers()
+            )
             if r.status_code == 200:
                 data = r.json()
                 server_topics = data.get("subscribed_topics", [])
@@ -290,7 +304,10 @@ class WebRTCRelayClient:
 
     async def _disconnect_from_go2(self):
         try:
-            r = await self.client.post(f"{self.url}/disconnect")
+            r = await self.client.post(
+                f"{self.url}/disconnect",
+                headers=self._get_auth_headers()
+            )
             if r.status_code != 200:
                 recreate_and_raise_exception(r.json())
             logger.info("[client] /disconnect:", r.json())
@@ -305,7 +322,10 @@ class WebRTCRelayClient:
         if self._topics_to_subscribe_to is None:
             # Try to fetch from server
             try:
-                r = await self.client.get(f"{self.url}/go2/subscriptions")
+                r = await self.client.get(
+                    f"{self.url}/go2/subscriptions",
+                    headers=self._get_auth_headers()
+                )
                 if r.status_code == 200:
                     data = r.json()
                     self._topics_to_subscribe_to = data.get("subscribed_topics", [])
@@ -358,7 +378,8 @@ class WebRTCRelayClient:
         
         r = await self.client.post(
             f"{self.url}/go2/update-subscriptions",
-            json={"topics": self._topics_to_subscribe_to}
+            json={"topics": self._topics_to_subscribe_to},
+            headers=self._get_auth_headers()
         )
         
         if r.status_code != 200:
@@ -392,7 +413,8 @@ class WebRTCRelayClient:
         logger.info(f"sending webrtc connection offer to webrtc relay server. {peer_offer_args=}")
         resp = await self.client.post(
             f"{self.url}/webrtc/offer", 
-            json=peer_offer_args.model_dump()
+            json=peer_offer_args.model_dump(),
+            headers=self._get_auth_headers()
         )
         if resp.status_code != 200:
             err_json = resp.json()
@@ -663,7 +685,8 @@ async def main(
     on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]], 
     on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
     on_lidar_update: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
-    topics_to_subscribe_to: list[str] | None = None
+    topics_to_subscribe_to: list[str] | None = None,
+    firebase_auth_manager: FirebaseAuthManager | None = None
 ):
     async with WebRTCRelayClient(
         relay_url=str(relay_url), 
@@ -671,7 +694,8 @@ async def main(
         on_video_track=on_video_track,
         on_lidar_frame=on_lidar_update,
         on_robot_data=on_robot_data,
-        topics_to_subscribe_to=topics_to_subscribe_to
+        topics_to_subscribe_to=topics_to_subscribe_to,
+        firebase_auth_manager=firebase_auth_manager
     ) as client:
         logger.info("created webrtc relay client, calling start")
         await client.start(True)
@@ -696,10 +720,30 @@ if __name__ == "__main__":
     p.add_argument("--robot-ip", default="192.168.12.1", help="GO2 AP IP (optional: call /connect first)")
     p.add_argument("--robot-num", type=int, default=0)
     p.add_argument("--token", default="")
+    p.add_argument("--firebase-id-token", default=None, help="Firebase ID token for authentication (or set FIREBASE_ID_TOKEN env var)")
+    p.add_argument("--firebase-config", default=None, help="Path to Firebase service account JSON file")
+    p.add_argument("--firebase-api-key", default=None, help="Firebase API key for user authentication")
+    p.add_argument("--firebase-email", default=None, help="Firebase email for user authentication")
+    p.add_argument("--firebase-password", default=None, help="Firebase password for user authentication")
     p.add_argument("--dump-lidar", action="store_true", dest="dump_lidar", help="Write lidar frames to lidar_dump.txt")
     p.add_argument("--send-ping", action="store_true", help="Send a small bytes payload on datachannel open")
     p.add_argument("--disconnect-on-exit", default=True, action="store_true", help="Call /disconnect on exit")
     args = p.parse_args()
+    
+    # Initialize Firebase authentication if provided
+    firebase_auth_manager = None
+    if args.firebase_id_token or args.firebase_config or args.firebase_api_key:
+        firebase_auth_manager = FirebaseAuthManager(
+            firebase_id_token=args.firebase_id_token or os.getenv("FIREBASE_ID_TOKEN"),
+            firebase_config_path=args.firebase_config,
+            firebase_api_key=args.firebase_api_key,
+            firebase_email=args.firebase_email,
+            firebase_password=args.firebase_password,
+        )
+        if not firebase_auth_manager.is_authenticated():
+            logger.warning("Firebase authentication configured but no valid token available")
+        else:
+            logger.info("Firebase authentication enabled")
 
     config = RobotConfig(
         robot_ip_list=[args.robot_ip], 
@@ -802,6 +846,7 @@ if __name__ == "__main__":
                 on_video_track=on_video_track,
                 on_lidar_update=on_lidar_update,
                 topics_to_subscribe_to=TOPICS_TO_SUBSCRIBE_TO,
+                firebase_auth_manager=firebase_auth_manager,
             )
         )
         # finally:

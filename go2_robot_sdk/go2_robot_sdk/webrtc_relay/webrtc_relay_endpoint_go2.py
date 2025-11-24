@@ -14,6 +14,7 @@ from go2_robot_sdk.webrtc_relay.webrtc_relay_app_state import WebRTCRelayAppStat
 from go2_robot_sdk.webrtc_relay.webrtc_relay_exceptions import StateException
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 from go2_robot_sdk.webrtc_relay.webrtc_relay_client_video_viewer import display_video
+from go2_robot_sdk.webrtc_relay.firebase_auth_server import verify_firebase_token
 
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,11 @@ class UpdateSubscriptionsArgs(BaseModel):
     topics: list[str]
 
 @router.post("/connect", response_model=ConnectReply)
-async def connect(args: ConnectArgs, state: WebRTCRelayAppState = Depends(get_app_state)):
+async def connect(
+    args: ConnectArgs, 
+    state: WebRTCRelayAppState = Depends(get_app_state),
+    user: dict = Depends(verify_firebase_token)
+):
     """
     Connect Raspberry Pi to the GO2 over the AP subnet using your Go2Connection.
     Stores the connection and (optional) video track in app.state.
@@ -163,7 +168,11 @@ class DisconnectReply(BaseModel):
 
 
 @router.post("/disconnect", response_model=DisconnectReply)
-async def disconnect(_args: DisconnectArgs, state: WebRTCRelayAppState = Depends(get_app_state)):
+async def disconnect(
+    _args: DisconnectArgs, 
+    state: WebRTCRelayAppState = Depends(get_app_state),
+    user: dict = Depends(verify_firebase_token)
+):
     """
     Disconnect from GO2 and tear down any existing PC session.
     """
@@ -189,7 +198,8 @@ async def disconnect(_args: DisconnectArgs, state: WebRTCRelayAppState = Depends
 @router.post("/update-subscriptions", response_model=DisconnectReply)
 async def update_subscriptions(
     args: UpdateSubscriptionsArgs,
-    state: WebRTCRelayAppState = Depends(get_app_state)
+    state: WebRTCRelayAppState = Depends(get_app_state),
+    user: dict = Depends(verify_firebase_token)
 ):
     """
     Update topic subscriptions for the current GO2 connection.
@@ -237,7 +247,8 @@ async def update_subscriptions(
 
 @router.get("/subscriptions")
 async def get_subscriptions(
-    state: WebRTCRelayAppState = Depends(get_app_state)
+    state: WebRTCRelayAppState = Depends(get_app_state),
+    user: dict = Depends(verify_firebase_token)
 ):
     """Get the list of topics currently subscribed to."""
     if state.go2 is None:

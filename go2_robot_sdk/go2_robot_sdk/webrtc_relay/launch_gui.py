@@ -61,6 +61,31 @@ Examples:
         help="Robot authentication token (default: empty)"
     )
     parser.add_argument(
+        "--firebase-id-token",
+        default=None,
+        help="Firebase ID token for authentication (or set FIREBASE_ID_TOKEN env var)"
+    )
+    parser.add_argument(
+        "--firebase-config",
+        default=None,
+        help="Path to Firebase service account JSON file"
+    )
+    parser.add_argument(
+        "--firebase-api-key",
+        default=None,
+        help="Firebase API key for user authentication"
+    )
+    parser.add_argument(
+        "--firebase-email",
+        default=None,
+        help="Firebase email for user authentication"
+    )
+    parser.add_argument(
+        "--firebase-password",
+        default=None,
+        help="Firebase password for user authentication"
+    )
+    parser.add_argument(
         "--check-only",
         action="store_true",
         help="Only check requirements, don't launch"
@@ -86,12 +111,26 @@ Examples:
     from go2_robot_sdk.webrtc_relay.gui_client import main as gui_main
     
     # Override sys.argv for the GUI client
-    sys.argv = [
+    sys_argv = [
         sys.argv[0],
         "--api", args.api,
         "--robot-ip", args.robot_ip,
         "--token", args.token,
     ]
+    
+    # Add Firebase auth arguments if provided
+    if args.firebase_id_token:
+        sys_argv.extend(["--firebase-id-token", args.firebase_id_token])
+    if args.firebase_config:
+        sys_argv.extend(["--firebase-config", args.firebase_config])
+    if args.firebase_api_key:
+        sys_argv.extend(["--firebase-api-key", args.firebase_api_key])
+    if args.firebase_email:
+        sys_argv.extend(["--firebase-email", args.firebase_email])
+    if args.firebase_password:
+        sys_argv.extend(["--firebase-password", args.firebase_password])
+    
+    sys.argv = sys_argv
     
     gui_main()
     return 0
