@@ -1,7 +1,7 @@
 # NOTE: not sure why im getting import warnings, this is working. 
 # We're pinned to a very specific version of aiortc, 1.9. 1.11 doesn't work. 
 # 1.13 or higher has conflicts with v0.9 of forked aioice. This should be resolved at some point 
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel  # type: ignore
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCDataChannel, RTCIceServer  # type: ignore
 import asyncio
 import contextlib
 import httpx
@@ -391,7 +391,33 @@ class WebRTCRelayClient:
 
     async def _create_peer_connection(self) -> tuple[RTCPeerConnection, RTCDataChannel]:
         logger.info(f"establishing WebRTC connection to webrtc relay server")
-        peer = RTCPeerConnection(configuration=RTCConfiguration(iceServers=[]))
+        
+        # Convert dictionaries to RTCIceServer objects (aiortc expects RTCIceServer objects, not dicts)
+        ice_servers = [
+            RTCIceServer(urls="stun:stun.relay.metered.ca:80"),
+            RTCIceServer(
+                urls="turn:global.relay.metered.ca:80",
+                username="b8230be836268f5fc56941ac",
+                credential="In0b2wMjJ29SNC6h",
+            ),
+            RTCIceServer(
+                urls="turn:global.relay.metered.ca:80?transport=tcp",
+                username="b8230be836268f5fc56941ac",
+                credential="In0b2wMjJ29SNC6h",
+            ),
+            RTCIceServer(
+                urls="turn:global.relay.metered.ca:443",
+                username="b8230be836268f5fc56941ac",
+                credential="In0b2wMjJ29SNC6h",
+            ),
+            RTCIceServer(
+                urls="turns:global.relay.metered.ca:443?transport=tcp",
+                username="b8230be836268f5fc56941ac",
+                credential="In0b2wMjJ29SNC6h",
+            ),
+        ]
+        
+        peer = RTCPeerConnection(configuration=RTCConfiguration(iceServers=ice_servers))
         peer.on(
             "connectionstatechange", 
             lambda: logger.info(f"webrtc relay client peer connection {peer.connectionState=}")
