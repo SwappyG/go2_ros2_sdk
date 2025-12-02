@@ -35,6 +35,7 @@ from go2_robot_sdk.application.utils import command_generator
 from go2_robot_sdk.webrtc_relay.webrtc_stats_monitor import WebRTCStatsMonitor
 from go2_robot_sdk.webrtc_relay.keyboard_command_handler import KeyboardCommandHandler, TerminalInputAdapter
 from go2_robot_sdk.webrtc_relay.firebase_auth import FirebaseAuthManager, get_auth_headers
+from go2_robot_sdk.webrtc_relay.ice_server_config import get_rtc_configuration, get_ice_servers_list
 
 logging.basicConfig(
     level=logging.INFO,
@@ -392,32 +393,29 @@ class WebRTCRelayClient:
     async def _create_peer_connection(self) -> tuple[RTCPeerConnection, RTCDataChannel]:
         logger.info(f"establishing WebRTC connection to webrtc relay server")
         
-        # Convert dictionaries to RTCIceServer objects (aiortc expects RTCIceServer objects, not dicts)
-        ice_servers = [
-            RTCIceServer(urls="stun:stun.relay.metered.ca:80"),
-            RTCIceServer(
-                urls="turn:global.relay.metered.ca:80",
-                username="b8230be836268f5fc56941ac",
-                credential="In0b2wMjJ29SNC6h",
-            ),
-            RTCIceServer(
-                urls="turn:global.relay.metered.ca:80?transport=tcp",
-                username="b8230be836268f5fc56941ac",
-                credential="In0b2wMjJ29SNC6h",
-            ),
-            RTCIceServer(
-                urls="turn:global.relay.metered.ca:443",
-                username="b8230be836268f5fc56941ac",
-                credential="In0b2wMjJ29SNC6h",
-            ),
-            RTCIceServer(
-                urls="turns:global.relay.metered.ca:443?transport=tcp",
-                username="b8230be836268f5fc56941ac",
-                credential="In0b2wMjJ29SNC6h",
-            ),
-        ]
+        # Get ICE server configuration from environment variables
+        rtc_config = get_rtc_configuration()
+        ice_servers = get_ice_servers_list()
         
-        peer = RTCPeerConnection(configuration=RTCConfiguration(iceServers=ice_servers))
+        # Safely extract URLs for logging
+        ice_server_urls = []
+        for s in ice_servers:
+            try:
+                if isinstance(s, dict):
+                    url = s.get('urls', 'unknown')
+                    # Handle case where urls might be a list
+                    if isinstance(url, list):
+                        url = url[0] if url else 'unknown'
+                else:
+                    # Handle case where it might be an object with urls attribute
+                    url = getattr(s, 'urls', 'unknown')
+                ice_server_urls.append(str(url))
+            except Exception as e:
+                logger.warning(f"Error extracting ICE server URL: {e}, server: {s}")
+                ice_server_urls.append('unknown')
+        logger.info(f"Using ICE servers: {ice_server_urls}")
+        
+        peer = RTCPeerConnection(configuration=rtc_config)
         peer.on(
             "connectionstatechange", 
             lambda: logger.info(f"webrtc relay client peer connection {peer.connectionState=}")
