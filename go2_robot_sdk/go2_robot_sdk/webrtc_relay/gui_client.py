@@ -1188,7 +1188,9 @@ class GO2GuiClient(QMainWindow):
         self.lidar_widget.update_robot_pose(position, orientation)
     
     def closeEvent(self, event):
-        """Handle window close event."""
+        """Handle window close event - disconnect from relay server before closing."""
+        logger.info("GUI window closing, initiating cleanup...")
+        
         # Stop movement timer
         if self.move_timer.isActive():
             self.move_timer.stop()
@@ -1204,26 +1206,32 @@ class GO2GuiClient(QMainWindow):
             except Exception as e:
                 logger.warning(f"Error closing VoxelMapViewer: {e}")
         
-        # Disconnect client synchronously
-        # if self.client:
-        #     loop = asyncio.get_event_loop()
-        #     if loop.is_running():
-        #         loop.create_task(self._cleanup_and_close())
-        #         event.ignore()  # Delay close until cleanup is done
-        #         QTimer.singleShot(500, self.close)  # Force close after 500ms
-        #     else:
-        #         event.accept()
-        # else:
-        #     event.accept()
-    
-    # def _cleanup_and_close(self):
-    #     """Async cleanup before close."""
-    #     try:
-    #         if self.client:
-    #             await self.client.shutdown()
-    #             self.client = None
-    #     except Exception as e:
-    #         logger.warning(f"Error during cleanup: {e}")
+        # Disconnect client if connected
+        if self.client:
+            try:
+                # Get the event loop from the client (stored by client_main)
+                loop = getattr(self.client, "_loop", None)
+                if loop is not None:
+                    logger.info("Disconnecting from relay server...")
+                    # Schedule shutdown on the client's event loop
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.client.shutdown(),
+                        loop
+                    )
+                    # Wait up to 3 seconds for shutdown to complete
+                    try:
+                        future.result(timeout=3.0)
+                        logger.info("Successfully disconnected from relay server")
+                    except Exception as e:
+                        logger.warning(f"Error during client shutdown: {e}")
+                else:
+                    logger.warning("Client event loop not available, cannot disconnect cleanly")
+            except Exception as e:
+                logger.warning(f"Error disconnecting client: {e}")
+            finally:
+                self.client = None
+        
+        event.accept()
 
 class GuiInvoker(QtCore.QObject):
     """Helper to run functions that originate from threads back onto main GUI thread"""
@@ -1252,11 +1260,22 @@ async def client_main(api, config, client, on_robot_data, on_video_track, on_lid
     try:
         client._loop = asyncio.get_running_loop()
         await client.start(connect_go2=True)
-        while True:
-            await asyncio.sleep(1)
+        # Keep running until shutdown is called or an exception occurs
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            logger.info("Client main loop cancelled, shutting down...")
+        except Exception as e:
+            logger.error(f"Error in client main loop: {e}")
     except Exception as e:
-        await client.shutdown()
         logger.error(f"Error in client main: {e}")
+    finally:
+        # Always attempt to shutdown cleanly
+        try:
+            await client.shutdown()
+        except Exception as e:
+            logger.warning(f"Error during client shutdown: {e}")
 
 def main():
     """Main entry point."""

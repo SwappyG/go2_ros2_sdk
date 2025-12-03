@@ -4,6 +4,7 @@ import asyncio
 from fastapi import HTTPException, Depends, APIRouter
 import json
 import logging
+import time
 from pydantic import BaseModel
 import typing as t  # pyright: ignore[reportUnusedImport]
 import os
@@ -34,11 +35,15 @@ def _on_go2_message(state: WebRTCRelayAppState, robot_data: RobotData):
     """
     Relay ONLY the parsed object (2nd arg) from GO2 -> PC.
     Serialize to JSON and send to the PC datachannel as TEXT.
+    Sending data to client counts as activity (keeps connection alive).
     """
     # pc_dc: RTCDataChannel | None = state.relay_rtc_data_channel
     if not state.relay_rtc_data_channel or state.relay_rtc_data_channel.readyState != "open":
         logging.debug(f'got message from go2, but datachannel is not open {robot_data.raw_message=}')
         return
+
+    # Update activity when sending data to client (keeps connection alive)
+    state.update_activity()
 
     try:
         if isinstance(robot_data.raw_message, bytes):
@@ -101,6 +106,36 @@ class ConnectReply(BaseModel):
 class UpdateSubscriptionsArgs(BaseModel):
     topics: list[str]
 
+async def _force_disconnect_all(state: WebRTCRelayAppState):
+    """Internal helper to force disconnect all connections. Used for idle timeout and user switching."""
+    # Stop idle timeout monitoring
+    if state.idle_timeout_task:
+        state.idle_timeout_task.cancel()
+        try:
+            await state.idle_timeout_task
+        except asyncio.CancelledError:
+            pass
+        state.idle_timeout_task = None
+    
+    # Stop stats monitoring
+    if state.go2_stats_monitor:
+        await state.go2_stats_monitor.stop()
+        state.go2_stats_monitor = None
+    
+    # Close relay peer connection
+    await state.close_rtc_relay_connection()
+    
+    # Close GO2 connection
+    if state.go2:
+        await state.go2.disconnect()
+        state.go2 = None
+        state.go2_video_track = None
+    
+    # Clear user tracking
+    state.current_user_id = None
+    state.current_user_email = None
+    state.last_activity_time = None
+
 @router.post("/connect", response_model=ConnectReply)
 async def connect(
     args: ConnectArgs, 
@@ -110,9 +145,52 @@ async def connect(
     """
     Connect Raspberry Pi to the GO2 over the AP subnet using your Go2Connection.
     Stores the connection and (optional) video track in app.state.
+    
+    Enforces single-user access: only one user can be connected at a time.
+    Auto-disconnects idle users after 5 minutes of inactivity.
     """
+    user_id = user.get("uid")
+    user_email = user.get("email")
+    
+    # Get idle timeout from environment (default: 5 minutes = 300 seconds)
+    idle_timeout_seconds = float(os.getenv("RELAY_IDLE_TIMEOUT_SECONDS", "300.0"))
+    
+    # Check if another user is already connected
+    if state.current_user_id is not None:
+        if state.current_user_id == user_id:
+            # Same user reconnecting - just update activity and allow
+            state.update_activity()
+            logger.info(f"User {user_id} ({user_email}) already connected, updating activity timestamp")
+            # If GO2 connection exists, we're done (don't reconnect)
+            if state.go2 is not None:
+                return ConnectReply(robot_ip=args.robot_ip)
+        else:
+            # Different user - check if current user is idle
+            if state.last_activity_time:
+                idle_time = time.time() - state.last_activity_time
+                if idle_time < idle_timeout_seconds:
+                    # Current user is still active
+                    raise StateException(
+                        f"Another user ({state.current_user_email}) is currently connected and active. "
+                        f"Please wait until they disconnect or become idle (after {idle_timeout_seconds/60:.1f} minutes)."
+                    )
+                else:
+                    # Current user is idle, disconnect them automatically
+                    logger.info(
+                        f"Disconnecting idle user {state.current_user_id} ({state.current_user_email}) "
+                        f"after {idle_time:.1f}s of inactivity to allow {user_id} ({user_email})"
+                    )
+                    # Force disconnect the idle user
+                    await state._force_disconnect_idle_user()
+            else:
+                # No activity time recorded, disconnect anyway
+                logger.warning(f"Disconnecting existing connection without activity time to allow {user_id}")
+                await _force_disconnect_all(state)
+    
+    # Block if GO2 is still connected (shouldn't happen after disconnect, but safety check)
     if state.go2 is not None:
-        raise StateException("Already connected to Go2, call disconnect first before calling connect again")
+        logger.warning("GO2 connection still exists after user change, forcing disconnect")
+        await _force_disconnect_all(state)
 
     go2 = Go2Connection(
         robot_ip=args.robot_ip,
@@ -131,6 +209,14 @@ async def connect(
         raise HTTPException(status_code=502, detail=f"GO2 connect failed: {e}")
 
     state.go2 = go2
+    
+    # Set current user and update activity
+    state.current_user_id = user_id
+    state.current_user_email = user_email
+    state.update_activity()
+    
+    # Start idle timeout monitoring
+    await state.start_idle_timeout_monitor(timeout_seconds=idle_timeout_seconds)
     
     # Wait for WebRTC connection to be fully established before starting stats monitoring
     # This ensures stats collection will have meaningful data
@@ -157,6 +243,7 @@ async def connect(
     else:
         logger.info("WebRTC stats monitoring disabled")
     
+    logger.info(f"User {user_id} ({user_email}) successfully connected to GO2")
     return ConnectReply(robot_ip=args.robot_ip)
 
 
@@ -175,17 +262,37 @@ async def disconnect(
 ):
     """
     Disconnect from GO2 and tear down any existing PC session.
+    Clears user tracking and stops idle timeout monitoring.
     """
+    user_id = user.get("uid")
+    user_email = user.get("email")
+    
+    # Verify user is authorized to disconnect (must be the connected user)
+    if state.current_user_id is not None and state.current_user_id != user_id:
+        logger.warning(
+            f"User {user_id} ({user_email}) attempted to disconnect, "
+            f"but current connected user is {state.current_user_id} ({state.current_user_email})"
+        )
+        # Still allow disconnect to prevent stuck connections
+    
+    logger.info(f"User {user_id} ({user_email}) disconnecting")
+    
+    # Stop idle timeout monitoring
+    if state.idle_timeout_task:
+        state.idle_timeout_task.cancel()
+        try:
+            await state.idle_timeout_task
+        except asyncio.CancelledError:
+            pass
+        state.idle_timeout_task = None
+    
     # Stop stats monitoring
     if state.go2_stats_monitor:
         await state.go2_stats_monitor.stop()
         state.go2_stats_monitor = None
     
     # Close PC side first
-    if state.relay_rtc_peer_connection:
-        await state.relay_rtc_peer_connection.close()
-        state.relay_rtc_peer_connection = None
-        state.relay_rtc_data_channel = None
+    await state.close_rtc_relay_connection()
 
     # Close GO2
     if state.go2:
@@ -193,6 +300,12 @@ async def disconnect(
         state.go2 = None
         state.go2_video_track = None
 
+    # Clear user tracking
+    state.current_user_id = None
+    state.current_user_email = None
+    state.last_activity_time = None
+    
+    logger.info(f"User {user_id} ({user_email}) successfully disconnected")
     return
 
 @router.post("/update-subscriptions", response_model=DisconnectReply)
@@ -204,7 +317,11 @@ async def update_subscriptions(
     """
     Update topic subscriptions for the current GO2 connection.
     This will unsubscribe from old topics and subscribe to new ones.
+    Updates activity timestamp.
     """
+    # Update activity on subscription changes
+    state.update_activity()
+    
     if state.go2 is None:
         raise StateException("Not connected to GO2. Call /connect first.")
     

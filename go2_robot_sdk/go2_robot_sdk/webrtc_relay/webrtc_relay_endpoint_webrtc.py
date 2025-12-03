@@ -26,6 +26,9 @@ class OfferReply(BaseModel):
 def _on_datachannel_message(state: WebRTCRelayAppState, message: t.Any):
     """handler for messages inbound from relay'ed webrtc connection"""
     logger.debug(f"relay rtc data channel got {message=}")
+    # Update activity timestamp on any message from client
+    state.update_activity()
+    
     # take reference to go2 in case its modified later
     # go2: Go2Connection = state.go2
     if not state.go2:
@@ -55,6 +58,17 @@ async def offer(
     state: WebRTCRelayAppState = Depends(get_app_state),
     user: dict = Depends(verify_firebase_token)
 ):
+    """Handle WebRTC offer from client. Updates activity timestamp."""
+    user_id = user.get("uid")
+    
+    # Verify user is authorized (must be the connected user)
+    if state.current_user_id is not None and state.current_user_id != user_id:
+        raise StateException(
+            f"User {user_id} is not authorized. Currently connected user is {state.current_user_id}."
+        )
+    
+    # Update activity on offer
+    state.update_activity()
 
     if state.go2 is None:
         raise StateException("connection to the go2 hasn't been established yet, call /connect first")
