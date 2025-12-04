@@ -67,6 +67,7 @@ class WebRTCRelayClient:
         self._peer_datachannel = None
         self._stats_monitor: WebRTCStatsMonitor | None = None
         self._topics_to_subscribe_to = topics_to_subscribe_to
+        self._shutdown_requested = False  # Flag to signal shutdown
 
     async def __aenter__(self):
         return self
@@ -81,6 +82,9 @@ class WebRTCRelayClient:
     async def shutdown(self):
         """Fully shutdown client, disconnecting from GO2 and closing all connections."""
         logger.info("Shutting down WebRTC relay client...")
+        
+        # Set shutdown flag to break the infinite loop
+        self._shutdown_requested = True
         
         # Stop stats monitoring
         if self._stats_monitor:
@@ -339,7 +343,8 @@ class WebRTCRelayClient:
     async def _disconnect_from_go2(self):
         try:
             r = await self.client.post(
-                f"{self.url}/disconnect",
+                f"{self.url}/go2/disconnect",
+                json={},  # Send empty JSON body as required by FastAPI for Pydantic model parameter
                 headers=self._get_auth_headers()
             )
             if r.status_code != 200:

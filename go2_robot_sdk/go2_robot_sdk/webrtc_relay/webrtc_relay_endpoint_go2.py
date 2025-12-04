@@ -306,7 +306,7 @@ async def disconnect(
     state.last_activity_time = None
     
     logger.info(f"User {user_id} ({user_email}) successfully disconnected")
-    return
+    return DisconnectReply()
 
 @router.post("/update-subscriptions", response_model=DisconnectReply)
 async def update_subscriptions(
