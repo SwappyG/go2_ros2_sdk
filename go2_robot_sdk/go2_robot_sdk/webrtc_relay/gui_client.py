@@ -5,6 +5,7 @@ import sys
 import asyncio
 import argparse
 import logging
+import threading
 import typing as t
 import numpy as np
 import numpy.typing as npt
@@ -624,6 +625,7 @@ class GO2GuiClient(QMainWindow):
         self.relay_url = relay_url
         # self.robot_config = robot_config
         # self.client: WebRTCRelayClient | None = None
+        self.client_thread: threading.Thread | None = None  # Store client thread for cleanup
         self.signals = RobotControlSignals()
         self.video_track: MediaStreamTrack | None = None
         self.video_task: asyncio.Task[None] | None = None
@@ -794,9 +796,10 @@ class GO2GuiClient(QMainWindow):
         
         central_widget.setLayout(main_layout)
 
-    def add_client(self, client: WebRTCRelayClient):
+    def add_client(self, client: WebRTCRelayClient, client_thread: threading.Thread | None = None):
         """Add WebRTCRelayClient to the GUI client."""
         self.client = client
+        self.client_thread = client_thread  # Store thread reference for cleanup
         
         # Initialize keyboard command handler
         self.keyboard_handler = KeyboardCommandHandler(client)
@@ -1188,7 +1191,9 @@ class GO2GuiClient(QMainWindow):
         self.lidar_widget.update_robot_pose(position, orientation)
     
     def closeEvent(self, event):
-        """Handle window close event."""
+        """Handle window close event - disconnect from relay server before closing."""
+        logger.info("GUI window closing, initiating cleanup...")
+        
         # Stop movement timer
         if self.move_timer.isActive():
             self.move_timer.stop()
@@ -1204,26 +1209,41 @@ class GO2GuiClient(QMainWindow):
             except Exception as e:
                 logger.warning(f"Error closing VoxelMapViewer: {e}")
         
-        # Disconnect client synchronously
-        # if self.client:
-        #     loop = asyncio.get_event_loop()
-        #     if loop.is_running():
-        #         loop.create_task(self._cleanup_and_close())
-        #         event.ignore()  # Delay close until cleanup is done
-        #         QTimer.singleShot(500, self.close)  # Force close after 500ms
-        #     else:
-        #         event.accept()
-        # else:
-        #     event.accept()
-    
-    # def _cleanup_and_close(self):
-    #     """Async cleanup before close."""
-    #     try:
-    #         if self.client:
-    #             await self.client.shutdown()
-    #             self.client = None
-    #     except Exception as e:
-    #         logger.warning(f"Error during cleanup: {e}")
+        # Disconnect client if connected
+        if self.client:
+            try:
+                # Get the event loop from the client (stored by client_main)
+                loop = getattr(self.client, "_loop", None)
+                if loop is not None:
+                    logger.info("Disconnecting from relay server...")
+                    # Schedule shutdown on the client's event loop
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.client.shutdown(),
+                        loop
+                    )
+                    # Wait up to 3 seconds for shutdown to complete
+                    try:
+                        future.result(timeout=3.0)
+                        logger.info("Successfully disconnected from relay server")
+                    except Exception as e:
+                        logger.warning(f"Error during client shutdown: {e}")
+                else:
+                    logger.warning("Client event loop not available, cannot disconnect cleanly")
+            except Exception as e:
+                logger.warning(f"Error disconnecting client: {e}")
+            finally:
+                self.client = None
+        
+        # Wait for client thread to finish (with timeout)
+        if self.client_thread and self.client_thread.is_alive():
+            logger.info("Waiting for client thread to finish...")
+            self.client_thread.join(timeout=5.0)  # Wait up to 5 seconds
+            if self.client_thread.is_alive():
+                logger.warning("Client thread did not finish within timeout, continuing anyway")
+            else:
+                logger.info("Client thread finished successfully")
+        
+        event.accept()
 
 class GuiInvoker(QtCore.QObject):
     """Helper to run functions that originate from threads back onto main GUI thread"""
@@ -1252,11 +1272,27 @@ async def client_main(api, config, client, on_robot_data, on_video_track, on_lid
     try:
         client._loop = asyncio.get_running_loop()
         await client.start(connect_go2=True)
-        while True:
-            await asyncio.sleep(1)
+        # Keep running until shutdown is requested
+        try:
+            while not client._shutdown_requested:
+                await asyncio.sleep(0.5)  # Check more frequently for shutdown
+            logger.info("Shutdown requested, exiting client main loop...")
+        except asyncio.CancelledError:
+            logger.info("Client main loop cancelled, shutting down...")
+        except Exception as e:
+            logger.error(f"Error in client main loop: {e}")
     except Exception as e:
-        await client.shutdown()
         logger.error(f"Error in client main: {e}")
+    finally:
+        # Always attempt to shutdown cleanly (shutdown() is safe to call multiple times)
+        try:
+            if not client._shutdown_requested:
+                # Set flag and shutdown if not already done
+                client._shutdown_requested = True
+                await client.shutdown()
+        except Exception as e:
+            logger.warning(f"Error during client shutdown: {e}")
+        logger.info("Client main thread exiting")
 
 def main():
     """Main entry point."""
@@ -1348,8 +1384,6 @@ def main():
         firebase_auth_manager=firebase_auth_manager,
     )
 
-    window.add_client(client)
-
     def client_thread():
         try:
             asyncio.run(
@@ -1365,9 +1399,11 @@ def main():
         except Exception as e:
             logger.error(f"Connection failed: {e}")
 
-    import threading
-    client_thread_handle = threading.Thread(target=client_thread)
+    client_thread_handle = threading.Thread(target=client_thread, daemon=False)
     client_thread_handle.start()
+    
+    # Pass client and thread to window for proper cleanup
+    window.add_client(client, client_thread_handle)
         
 
     # Enable Ctrl+C handling
