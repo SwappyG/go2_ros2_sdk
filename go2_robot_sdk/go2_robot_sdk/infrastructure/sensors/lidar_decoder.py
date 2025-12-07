@@ -10,7 +10,7 @@ import ctypes
 import numpy as np
 import numpy.typing as npt
 import math
-from typing import cast
+from typing import cast, Any
 from pathlib import Path
 import go2_robot_sdk
 from wasmtime import Config, Engine, Store, Module, Instance, Func, FuncType, ValType, Memory
@@ -19,7 +19,8 @@ from go2_robot_sdk.infrastructure.sensors.lidar_decoder_result import DecodeResu
 try:
     from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
 except ImportError:
-    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent.parent)
+    def get_package_share_directory() -> str:
+        return str(Path(go2_robot_sdk.__file__).parent)
 
 
 def update_meshes_for_cloud2(
@@ -27,7 +28,7 @@ def update_meshes_for_cloud2(
     uvs: npt.NDArray[np.uint8], 
     res: float, 
     origin: tuple[float, float, float], 
-    intense_limiter: float
+    intense_limiter: float,
 ) -> npt.NDArray[np.float32]:
     """
     Process LiDAR point cloud data for ROS2 PointCloud2 message.
@@ -66,9 +67,7 @@ def update_meshes_for_cloud2(
     ]
 
     # Remove duplicate points
-    unique_points = np.unique(filtered_points, axis=0)
-    
-    return unique_points
+    return np.unique(filtered_points, axis=0)
 
 
 class LidarDecoder:
@@ -80,7 +79,7 @@ class LidarDecoder:
         config.debug_info = True
         self.store = Store(Engine(config))
 
-        libvoxel_path = Path(get_package_share_directory('go2_robot_sdk')) / "external_lib" / "libvoxel.wasm"
+        libvoxel_path = Path(get_package_share_directory()).parent / "external_lib" / "libvoxel.wasm"
         self.module = Module.from_file(self.store.engine, libvoxel_path)
 
         self.a_callback_type = FuncType([ValType.i32()], [ValType.i32()])
@@ -119,24 +118,24 @@ class LidarDecoder:
         self.pointCount = self.malloc(self.store, 4)
         self.decompressBufferSize = 80000
 
-    def adjust_memory_size(self, t):
+    def adjust_memory_size(self, _t: Any) -> int:
         return len(self.HEAPU8)
 
-    def copy_within(self, target, start, end):
+    def copy_within(self, target, start, end):  # noqa: ANN001, ANN201
         sublist = self.HEAPU8[start:end]
         for i in range(len(sublist)):
             if target + i < len(self.HEAPU8):
                 self.HEAPU8[target + i] = sublist[i]
 
-    def copy_memory_region(self, t, n, a):
+    def copy_memory_region(self, t, n, a): # noqa: ANN001, ANN201
         self.copy_within(t, n, n + a)
 
-    def get_value(self, t, n="i8"):
+    def get_value(self, t, n="i8"): # noqa: ANN001, ANN201
         if n.endswith("*"):
             n = "*"
-        if n == "i1" or n == "i8":
+        if n == "i1" or n == "i8": 
             return self.HEAP8[t]
-        elif n == "i16":
+        elif n == "i16":  # noqa: RET505
             return self.HEAP16[t >> 1]
         elif n == "i32" or n == "i64":
             return self.HEAP32[t >> 2]
@@ -149,14 +148,14 @@ class LidarDecoder:
         else:
             raise ValueError(f"invalid type for getValue: {n}")
 
-    def add_value_arr(self, start, value):
+    def add_value_arr(self, start, value):  # noqa: ANN001, ANN201
         if start + len(value) <= len(self.HEAPU8):
             for i, byte in enumerate(value):
                 self.HEAPU8[start + i] = byte
         else:
             raise ValueError("Not enough space to insert bytes at the specified index.")
 
-    def decode(self, compressed_data, data) -> DecodeResult:
+    def decode(self, compressed_data, data) -> DecodeResult:  # noqa: ANN001
         """Original decode method that actually works with the WASM module"""
         self.add_value_arr(self.input, compressed_data)
 
@@ -174,7 +173,7 @@ class LidarDecoder:
             self.indices,
             self.faceCount,
             self.pointCount,
-            some_v
+            some_v,
         )
 
         self.get_value(self.decompressedSize, "i32")
@@ -198,7 +197,7 @@ class LidarDecoder:
             "face_count": u,
             "positions": p,
             "uvs": r,
-            "indices": o
+            "indices": o,
         }
 
 
@@ -216,7 +215,7 @@ def decode_lidar_data(
     compressed_data: bytes,
     resolution: float = 0.01,
     origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    intensity_threshold: float = 0.1
+    intensity_threshold: float = 0.1,
 ) -> npt.NDArray[np.float32]:
     """
     High-level function to decode LiDAR data.
@@ -233,11 +232,11 @@ def decode_lidar_data(
     decoder = get_voxel_decoder()
     metadata = {
         "origin": origin,
-        "resolution": resolution
+        "resolution": resolution,
     }
     
     result = decoder.decode(compressed_data, metadata)
     
     return update_meshes_for_cloud2(
-        result["positions"], result["uvs"], resolution, origin, intensity_threshold
+        result["positions"], result["uvs"], resolution, origin, intensity_threshold,
     ) 

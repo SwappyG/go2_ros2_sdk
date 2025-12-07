@@ -9,8 +9,14 @@ Handles HTTP communication with robot for establishing WebRTC connections.
 import logging
 import requests
 import copy
-from typing import Optional, Dict
-from requests.exceptions import RequestException, HTTPError, ConnectionError, Timeout
+import json
+from types import TracebackType
+from requests.exceptions import (
+    RequestException, 
+    HTTPError, 
+    ConnectionError as RequestsConnectionError, 
+    Timeout,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,16 +44,16 @@ class HttpClient:
         self.session.headers.update({
             'User-Agent': 'Go2WebRTC/1.0',
             'Accept': 'application/json, text/plain, */*',
-            'Connection': 'keep-alive'
+            'Connection': 'keep-alive',
         })
     
     def make_request(
         self, 
         url: str, 
         method: str = 'POST',
-        body: Optional[str] = None, 
-        headers: Optional[Dict[str, str]] = None
-    ) -> Optional[requests.Response]:
+        body: str | None = None, 
+        headers: dict[str, str] | None = None,
+    ) -> requests.Response | None:
         """
         Make HTTP request with error handling.
         
@@ -79,7 +85,7 @@ class HttpClient:
                 url=url,
                 data=body,
                 headers=request_headers,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             
             # Check if the request was successful
@@ -90,27 +96,23 @@ class HttpClient:
             
             return response
             
-        except ConnectionError as e:
-            error_msg = f"Connection error when requesting {url}: {e}"
-            logger.error(error_msg)
-            raise WebRTCHttpError(error_msg)
+        except RequestsConnectionError as e:
+            logger.warning(f"Connection error when requesting {url}") 
+            raise WebRTCHttpError(f"Connection error when requesting {url}") from e
             
         except Timeout as e:
-            error_msg = f"Timeout when requesting {url}: {e}"
-            logger.error(error_msg)
-            raise WebRTCHttpError(error_msg)
+            logger.warning(f"Timeout when requesting {url}")
+            raise WebRTCHttpError(f"Timeout when requesting {url}") from e
             
         except HTTPError as e:
-            error_msg = f"HTTP error when requesting {url}: {e}"
-            logger.error(error_msg)
-            raise WebRTCHttpError(error_msg)
+            logger.warning(f"HTTP error when requesting {url}")
+            raise WebRTCHttpError(f"HTTP error when requesting {url}") from e
             
         except RequestException as e:
-            error_msg = f"Request error when requesting {url}: {e}"
-            logger.error(error_msg)
-            raise WebRTCHttpError(error_msg)
+            logger.warning(f"Request error when requesting {url}")
+            raise WebRTCHttpError(f"Request error when requesting {url}") from e
     
-    def get_robot_public_key(self, robot_ip: str) -> Optional[requests.Response]:
+    def get_robot_public_key(self, robot_ip: str) -> requests.Response | None:
         """
         Get robot's public key for encryption.
         
@@ -125,15 +127,15 @@ class HttpClient:
         try:
             return self.make_request(url, method='POST')
         except WebRTCHttpError as e:
-            logger.error(f"Failed to get robot public key: {e}")
+            logger.warning(f"Failed to get robot public key: {e=}")
             raise
     
     def send_encrypted_sdp(
         self, 
         robot_ip: str, 
         path_ending: str, 
-        encrypted_data: Dict[str, str]
-    ) -> Optional[requests.Response]:
+        encrypted_data: dict[str, str],
+    ) -> requests.Response | None:
         """
         Send encrypted SDP offer to robot.
         
@@ -149,14 +151,13 @@ class HttpClient:
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         
         try:
-            import json
             body = json.dumps(encrypted_data)
             return self.make_request(url, method='POST', body=body, headers=headers)
         except WebRTCHttpError as e:
-            logger.error(f"Failed to send encrypted SDP: {e}")
+            logger.warning(f"Failed to send encrypted SDP: {e}")
             raise
     
-    def close(self):
+    def close(self) -> None:
         """Close the HTTP session"""
         if self.session:
             self.session.close()
@@ -165,13 +166,13 @@ class HttpClient:
         """Context manager entry"""
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None):
         """Context manager exit"""
         self.close()
 
 
 # Backward compatibility function
-def make_local_request(path: str, body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Optional[requests.Response]:
+def make_local_request(path: str, body: str | None = None, headers: dict[str, str] | None = None) -> requests.Response | None:
     """
     Legacy function for backward compatibility.
     

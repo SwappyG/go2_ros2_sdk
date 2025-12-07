@@ -8,10 +8,7 @@ Loads camera calibration data from YAML files for different resolutions.
 
 import yaml
 import logging
-import glob
-import os
 import re
-from typing import Dict, Optional
 from pydantic import BaseModel
 from pathlib import Path
 import go2_robot_sdk
@@ -19,7 +16,8 @@ import go2_robot_sdk
 try:
     from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
 except ImportError:
-    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent)
+    def get_package_share_directory() -> str:
+        return str(Path(go2_robot_sdk.__file__).parent)
 
 logger = logging.getLogger(__name__)
 
@@ -44,32 +42,24 @@ class CameraConfigLoader:
     
     def __init__(self, package_name: str = 'go2_robot_sdk'):
         self.package_name = package_name
-        self._camera_info_cache: Optional[Dict[int, GO2CameraInfo]] = None
+        self._camera_info_cache: dict[int, GO2CameraInfo] | None = None
     
     def get_supported_resolutions(self) -> list[int]:
         """Get list of supported camera resolutions"""
-        try:
-
-            # calibration_dir = pathlib.Path(__file__).parent.parent.parent.parent / "calibration"
-            calibration_dir = Path(get_package_share_directory(self.package_name)) / "calibration"
-            
-            pattern = os.path.join(calibration_dir, "front_camera_*.yaml")
-            files = glob.glob(pattern)
-            
-            resolutions = []
-            for file_path in files:
-                filename = os.path.basename(file_path)
-                numbers = re.findall(r"\d+", filename)
-                if numbers:
-                    resolutions.append(int(numbers[0]))
-            
-            return sorted(resolutions)
-            
-        except Exception as e:
-            logger.error(f"Failed to get supported resolutions: {e}")
-            return []
+        calibration_dir = Path(get_package_share_directory()) / "calibration"
+        
+        files = calibration_dir.glob("front_camera_*.yaml")
+        
+        resolutions = []
+        for file_path in files:
+            filename = file_path.name
+            numbers = re.findall(r"\d+", filename)
+            if numbers:
+                resolutions.append(int(numbers[0]))
+        
+        return sorted(resolutions)
     
-    def load_camera_info_for_resolution(self, height: int) -> Optional[GO2CameraInfo]:
+    def load_camera_info_for_resolution(self, height: int) -> GO2CameraInfo | None:
         """
         Load camera info for specific resolution.
         
@@ -79,18 +69,19 @@ class CameraConfigLoader:
         Returns:
             CameraInfo message or None if loading fails
         """
+        calibration_dir = Path(get_package_share_directory()) / "calibration"
+        yaml_file = calibration_dir / f"front_camera_{height}.yaml"
+            
+        if not yaml_file.exists():
+            logger.warning(f"Camera calibration file not found: {yaml_file}")
+            return None
+        
+        logger.info(f"Loading camera info from file: {yaml_file}")
+        
+        with Path.open(yaml_file) as file_handle:
+            camera_data = yaml.safe_load(file_handle)
+            
         try:
-            yaml_file = Path(get_package_share_directory(self.package_name)) / "calibration" / f"front_camera_{height}.yaml"
-            
-            if not yaml_file.exists():
-                logger.warning(f"Camera calibration file not found: {yaml_file}")
-                return None
-            
-            logger.info(f"Loading camera info from file: {yaml_file}")
-            
-            with open(yaml_file, "r") as file_handle:
-                camera_data = yaml.safe_load(file_handle)
-            
             # Create and populate CameraInfo message
             return GO2CameraInfo(
                 camera_name=camera_data["camera_name"],
@@ -103,11 +94,11 @@ class CameraConfigLoader:
                 distortion_model=camera_data["distortion_model"],
             )
             
-        except Exception as e:
-            logger.error(f"Failed to load camera info for height {height}: {e}")
+        except (KeyError, ValueError):
+            logger.exception(f"Failed to load camera info for height {height}")
             return None
     
-    def load_all_camera_info(self) -> Dict[int, GO2CameraInfo]:
+    def load_all_camera_info(self) -> dict[int, GO2CameraInfo]:
         """
         Load camera info for all supported resolutions.
         
@@ -130,7 +121,7 @@ class CameraConfigLoader:
         self._camera_info_cache = camera_info_dict
         return camera_info_dict
     
-    def get_camera_info(self, height: int) -> Optional[GO2CameraInfo]:
+    def get_camera_info(self, height: int) -> GO2CameraInfo | None:
         """
         Get camera info for specific height with caching.
         
@@ -147,18 +138,18 @@ class CameraConfigLoader:
 
 
 # Global loader instance for backward compatibility
-_camera_loader: Optional[CameraConfigLoader] = None
+_camera_loader: CameraConfigLoader | None = None
 
 
 def get_camera_loader() -> CameraConfigLoader:
     """Get singleton camera config loader instance"""
-    global _camera_loader
+    global _camera_loader  # noqa: PLW0603
     if _camera_loader is None:
         _camera_loader = CameraConfigLoader()
     return _camera_loader
 
 
-def load_camera_info() -> Dict[int, GO2CameraInfo]:
+def load_camera_info() -> dict[int, GO2CameraInfo]:
     """
     Load camera info for all supported resolutions.
     Backward compatibility function.

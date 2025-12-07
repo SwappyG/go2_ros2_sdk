@@ -15,6 +15,7 @@ dependencies = [
     "pycryptodome >=3.23, < 4",
     "aiortc == 1.9",
     "requests >= 2.32, < 3",
+<<<<<<< HEAD
     "av < 17",
     "aiohttp >= 3.13, <= 4",
     "fastapi[standard] >= 0.119, < 1",
@@ -27,10 +28,19 @@ dependencies = [
     "keyboard >= 0.13, < 1",
     "firebase-admin (>=7.1.0,<8.0.0)",
     "pyrebase4 (>=4.8.0,<5.0.0)"
+=======
+    # "av < 17",
+    # "aiohttp >= 3.13, <= 4",
+    # "fastapi[standard] >= 0.119, < 1",
+    # "opencv-python >=4.11, < 5",
+    # "httpx >= 0.28, < 1",
+    # "qasync",
+    # "PySide6 >=6.6, <7",
+    # "open3d >= 0.19, < 1",
+    # "vtk",
+    # "keyboard >= 0.13, < 1"
+>>>>>>> d089207 (add ruff linter, clean up rules, and fix all issues that ruff pointed out)
 ]
-
-# [tool.poetry.dependencies]
-# aioice = { source = "../my_local_package", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

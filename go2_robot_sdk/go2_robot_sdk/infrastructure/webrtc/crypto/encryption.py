@@ -14,7 +14,9 @@ import base64
 import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_v1_5
+import logging
 
+logger = logging.getLogger(__name__)
 
 class EncryptionError(Exception):
     """Custom exception for encryption-related errors"""
@@ -62,23 +64,25 @@ class CryptoUtils:
     @staticmethod
     def aes_encrypt(data: str, key: str) -> str:
         """Encrypt the given data using AES (ECB mode with PKCS5 padding)"""
+        # Ensure key is 32 bytes for AES-256
+        key_bytes = key.encode('utf-8')
+            
         try:
-            # Ensure key is 32 bytes for AES-256
-            key_bytes = key.encode('utf-8')
-            
-            # Pad the data to ensure it is a multiple of block size
-            padded_data = CryptoUtils.pad(data)
-            
             # Create AES cipher in ECB mode
             cipher = AES.new(key_bytes, AES.MODE_ECB)
-            
+        except ValueError as e:
+            raise EncryptionError("invalid aes key") from e
+        
+        try:
+            # Pad the data to ensure it is a multiple of block size
+            padded_data = CryptoUtils.pad(data)
             encrypted_data = cipher.encrypt(padded_data)
-            encoded_encrypted_data = base64.b64encode(encrypted_data).decode('utf-8')
+        except ValueError as e:
+            raise EncryptionError(f"Failed to encrypt data") from e
+        
+        encoded_encrypted_data = base64.b64encode(encrypted_data).decode('utf-8')
+        return encoded_encrypted_data
             
-            return encoded_encrypted_data
-            
-        except Exception as e:
-            raise EncryptionError(f"Failed to encrypt data: {e}")
     
     @staticmethod
     def aes_decrypt(encrypted_data: str, key: str) -> str:
@@ -102,7 +106,7 @@ class CryptoUtils:
             return decrypted_data
             
         except Exception as e:
-            raise EncryptionError(f"Failed to decrypt data: {e}")
+            raise EncryptionError(f"Failed to decrypt data") from e
     
     @staticmethod
     def rsa_encrypt(data: str, public_key: RSA.RsaKey) -> str:
@@ -125,7 +129,7 @@ class CryptoUtils:
             return encoded_encrypted_data
             
         except Exception as e:
-            raise EncryptionError(f"Failed to RSA encrypt data: {e}")
+            raise EncryptionError(f"Failed to RSA encrypt data") from e
 
 
 class ValidationCrypto:
@@ -154,7 +158,7 @@ class ValidationCrypto:
     def encrypt_by_md5(input_str: str) -> str:
         """Create MD5 hash of input string"""
         try:
-            hash_obj = hashlib.md5()
+            hash_obj = hashlib.md5()  # noqa: S324, this is to match external usage by unitree 
             hash_obj.update(input_str.encode("utf-8"))
             return hash_obj.hexdigest()
         except Exception as e:
