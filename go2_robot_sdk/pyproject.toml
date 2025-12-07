@@ -15,20 +15,17 @@ dependencies = [
     "pycryptodome >=3.23, < 4",
     "aiortc == 1.9",
     "requests >= 2.32, < 3",
-    "av < 17",
-    "aiohttp >= 3.13, <= 4",
-    "fastapi[standard] >= 0.119, < 1",
-    "opencv-python >=4.11, < 5",
-    "httpx >= 0.28, < 1",
-    "qasync",
-    "PySide6 >=6.6, <7",
-    "open3d >= 0.19, < 1",
-    "vtk",
-    "keyboard >= 0.13, < 1"
+    # "av < 17",
+    # "aiohttp >= 3.13, <= 4",
+    # "fastapi[standard] >= 0.119, < 1",
+    # "opencv-python >=4.11, < 5",
+    # "httpx >= 0.28, < 1",
+    # "qasync",
+    # "PySide6 >=6.6, <7",
+    # "open3d >= 0.19, < 1",
+    # "vtk",
+    # "keyboard >= 0.13, < 1"
 ]
-
-# [tool.poetry.dependencies]
-# aioice = { source = "../my_local_package", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -8,7 +8,23 @@ target-version = "py310"
 
 include = [
     "pyproject.toml",
-    "go2_robot_sdk/webrtc_relay/.py"
+    "go2_robot_sdk/**"
+]
+
+exclude = [
+    "go2_robot_sdk/launch/**",
+    "go2_robot_sdk/meshes/**",
+    "go2_robot_sdk/resources/**",
+    "go2_robot_sdk/urdf/**",
+    "go2_robot_sdk/external_lib/**",
+    "go2_robot_sdk/dae/**",
+    "go2_robot_sdk/config/**",
+    "go2_robot_sdk/calibration/**",
+    "go2_robot_sdk/application/services/**",
+    "go2_robot_sdk/presentation/**",
+    "go2_robot_sdk/infrastructure/ros2/**",
+    "go2_robot_sdk/infrastructure/webrtc/webrtc_adapter.py",
+    "go2_robot_sdk/main.py"
 ]
 
 [lint]
@@ -17,40 +33,54 @@ select = [
 ]
 
 ignore = [
+    # Annotations for __init__, __enter__, __exit__, *args, **kwargs are annoying and not needed
     "ANN204", "ANN401", "ANN002", "ANN003",
-    "D",
-    "W",
-    "G004",
-    "PLR2004",
-    "UP035", "UP045", "UP037",
-    "COM812",
-    "I001",
-    "N818",
-    "FBT001", "FBT002", "FBT003", # reenable
-    "RET501", "RET505",
-    "TC001", "TC002", "TC003", # consider reenabling
-    "TC006", # don't reenable
-    "PYI034", # reenable
-    "C901",
-    "PLR0912", "PLR0915",
-    "ANN201", "ANN202", # reenable
-    "TRY003", "EM101", "EM102",
-    "TRY300",
-    "BLE001", # reenable
-    "RET504", "RET503",
-    "SIM108", "SIM102", "SIM910", "SIM212", "SIM117", "SIM105",
-    "C401",
-    "S608",
-    "ERA001",
-    "TD002", "TD003", "TD004", "FIX002",  # might be worth disabling everything here
-    "PERF",
-    "PIE790",
-    "PT011", "PT003",
-    "E501", # re-enable this after increasing line-length to 100
-    "PLW2901",
-    "SLOT000", "SLOT001",
-    "INP001", # reenable this
-    "F541",
+    "D", # pydocstring, lots of annoying things related to docstring formatting
+    "W", # pycodestyle, lots of opinionated warnings, all of which should be dealt by the formatter
+    "Q", # opinionated about single and double quotes. again, formatter should deal with this
+    "FBT", # opinionated about booleans. consider enabling eventually
+    "TD", "FIX", # warnings about todos, spammy and cumbersome
+    "SIM", # suggests simplifications. kind of opinionated and not really important. Spammy too.
+    
+    # stuff formatter should fix, leave alone if formatter doesn't fix
+    "I001", # import sorting. 
+    "E501", # line-too-long
+    "COM812", # missing-trailing-comma
+
+    # too-many-X
+    "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0916", "PLR0917",
+    "PLR1714", # merge comparisions
+
+    "TRY003", # don't use exception messages, seems like a bad rule 
+    "TRY300", # else-suggestion. way too opinionated
+    
+    "PIE790", # unnecessary-pass-statement, its nice visually to include a pass or ... sometimes
+    
+    # rules about f-strings. kind of annoying to maintain
+    "F541", "G004", "EM101", "EM102", # f-string without args / f-strings in logging
+    
+    # return statement related. opinionated, sometimes its nice to name things or be explicit
+    "RET504", # unnecessary assign before return. Sometimes its nice to name something before returning
+    "RET501", # don't return None, useless
+
+    "TC006", # use quotes in typing.cast, purely stylistic
+    "C901", # too many branches, seems unnecessary
+    "N818", # no-Error-suffix on new exceptions. It's better we don't do this to avoid collisions with builtins
+    
+    # pytest
+    "PT003", # warning that specifying scope=function is redunant. Sometimes its nice to be explicit
+
+
+    # Things to enable when we reach some level of sophistication
+    # "TC001", "TC002", "TC003", # improves import hygiene
+    # "PLR2004", # magic value comparison
+    # "PYI034", # use Self return instead of hardcoding
+    # "BLE001", # broad exception caught. This is bad, but work to implement consistently
+    # SIM
+    # ERA001, # commented out code detector. we don't really want messy commented out code in our codebase
+    # "PERF", # flags non-performant code patterns. good to eliminate these
+    # "PT011" # broad raises in pytests could be error prone. Add once we start writing more tests
+    # FBT, # this catches some bad usages of booleans in functions
 ]
 
 [lint.per-file-ignores]
@@ -78,7 +108,3 @@ ignore = [
     "PGH003", # this folder is full of blanket ignores. Maybe disable one day
 ]
 "parapro_app/parapro/core/cad/step.py" = ["ALL"]
-
-
-[lint.pylint]
-max-args = 6

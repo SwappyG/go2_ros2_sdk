@@ -50,7 +50,7 @@ def get_robot_joints(foot_position_value: list[float], foot_num: int) -> tuple[f
         # Thigh angle calculation
         thigh_angle = np.arccos(
             (leg_reach ** 2 + THIGH_LENGTH ** 2 - CALF_LENGTH ** 2) / 
-            (2 * leg_reach * THIGH_LENGTH)
+            (2 * leg_reach * THIGH_LENGTH),
         )
         
         # Calf angle calculation  
