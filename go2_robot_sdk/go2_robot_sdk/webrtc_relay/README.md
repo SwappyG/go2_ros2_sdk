@@ -5,8 +5,9 @@ This guide provides comprehensive instructions for setting up and configuring th
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Server-Side Configuration](#server-side-configuration)
-3. [Client-Side Configuration](#client-side-configuration)
+2. [Running the Setup](#running-the-setup)
+3. [Server-Side Configuration](#server-side-configuration)
+4. [Client-Side Configuration](#client-side-configuration)
 ---
 
 ## Overview
@@ -20,6 +21,32 @@ The WebRTC relay server enables remote access to Unitree Go2 robots over the int
 - Robot control and telemetry
 - Internet connectivity via TURN/STUN servers
 - Real-time statistics monitoring
+
+---
+
+## Running the Setup
+
+### Step 1: Start the Relay Server
+
+First, start the WebRTC relay server:
+
+```bash
+python webrtc_relay.py
+```
+
+The relay server will start and listen for client connections. Make sure you have configured the server's `.env` file (see [Server-Side Configuration](#server-side-configuration)).
+
+### Step 2: Start the Client
+
+In a separate terminal, start the GUI client:
+
+```bash
+python .\launch_gui.py --api https://perlpi5.just-robots.com --robot-ip localhost
+```
+
+**Parameters:**
+- `--api`: The URL of the relay server (use your relay server's public URL)
+- `--robot-ip`: The IP address of the Go2 robot (use `localhost` if the relay server is on the same network as the robot)
 
 ---
 
