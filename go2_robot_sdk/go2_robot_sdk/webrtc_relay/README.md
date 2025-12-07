@@ -48,8 +48,6 @@ python .\launch_gui.py --api https://perlpi5.just-robots.com --robot-ip localhos
 - `--api`: The URL of the relay server (use your relay server's public URL)
 - `--robot-ip`: The IP address of the Go2 robot (use `localhost` if the relay server is on the same network as the robot)
 
-**Note:** The client will automatically fetch ICE/TURN server configuration from the relay server, so you don't need to configure TURN credentials on the client side.
-
 ---
 
 ## Server-Side Configuration
