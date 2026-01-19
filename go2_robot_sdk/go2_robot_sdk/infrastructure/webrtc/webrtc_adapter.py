@@ -4,7 +4,7 @@
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 
 
@@ -31,13 +31,14 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
     def __init__(
         self, 
         config: RobotConfig, 
-        on_validated_callback: OnValidatedCB, 
-        on_data_callback: OnMessageCB,
+        on_validated_callback: Callable[[str], Any], 
+        on_data_callback: Callable[[RobotData], Any],
         on_video_frame_callback: OnVideoFrameCB | None = None, 
         event_loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.config = config
         self.connections: dict[str, Go2Connection] = {}
+        
         self.data_callback = on_data_callback
         self.webrtc_msgs = asyncio.Queue[str]()
         self.on_validated_callback = on_validated_callback
@@ -56,7 +57,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
         try:
             robot_idx = int(robot_id)
             robot_ip = self.config.robot_ip_list[robot_idx]
-            
+
             conn = Go2Connection(
                 robot_ip=robot_ip,
                 robot_num=int(robot_id),
@@ -92,7 +93,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             except Exception:
                 logger.exception(f"Error disconnecting from robot {robot_id}")
 
-    def set_data_callback(self, callback: OnMessageCB) -> None:
+    def set_data_callback(self, callback: Callable[[RobotData], Any]) -> None:
         """Set callback for data reception"""
         self.data_callback = callback
 
@@ -189,7 +190,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             except asyncio.QueueEmpty:
                 break
 
-    def _on_validated(self, robot_id: str) -> None:
+    async def _on_validated(self, robot_id: str) -> None:
         """Callback after connection validation"""
         try:
             if robot_id in self.connections:
@@ -197,15 +198,15 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                     self.connections[robot_id].data_channel.send(
                         json.dumps({"type": "subscribe", "topic": topic}))
             
-            self.on_validated_callback(robot_id)
+            await asyncio.to_thread(self.on_validated_callback, robot_id)
                 
         except Exception as e:
             logger.error(f"Error in validated callback: {e}")
 
-    def _on_data_channel_message(self, msg: RobotData) -> None:
+    async def _on_data_channel_message(self, msg: RobotData) -> None:
         """Handle incoming data channel messages"""
         try:
-            self.data_callback(msg)
+            await asyncio.to_thread(self.data_callback, msg)
         
         except Exception as e:
             logger.error(f"Error processing data channel message: {e}") 
