@@ -170,7 +170,6 @@ class Go2Connection:
             
             elif isinstance(message, bytes):
                 lidar_frame = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
-                logger.info(f"{lidar_frame=}")
                 if lidar_frame is not None:
                     robot_data = go2_parsers.process_webrtc_message(lidar_frame, self.robot_num)
                     
