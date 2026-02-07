@@ -2,34 +2,35 @@
 name = "go2-robot-sdk"
 version = "0.1.0"
 description = "establish connection to unitree go2 and expose data over webrtc and http"
-authors = []
-license = {text = "BSD-3-Clause"}
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
+license = { text = "BSD-3-Clause" }
+authors = []
+maintainers = [ { name = "brimo", email = "abizov94@gmail.com" } ]
 dependencies = [
-    "aioice @ git+https://github.com/legion1581/aioice.git@go2",
-    "numpy >=1.26, < 2",
-    "pydantic >=2.12, < 3",
-    "PyYAML >=6.0, < 7",
-    "wasmtime >=37, < 38",
-    "pycryptodome >=3.23, < 4",
-    "aiortc == 1.9",
-    "requests >= 2.32, < 3",
-    "av < 17",
-    "aiohttp >= 3.13, <= 4",
-    "fastapi[standard] >= 0.119, < 1",
-    "opencv-python >=4.11, < 5",
-    "httpx >= 0.28, < 1",
-    "qasync",
-    "PySide6 >=6.6, <7",
-    "open3d >= 0.19, < 1",
-    "vtk",
-    "keyboard >= 0.13, < 1"
+	"aioice @ git+https://github.com/legion1581/aioice.git@go2",
+	"numpy>=1.26,<2",
+	"pydantic>=2.12,<3",
+	"PyYAML>=6.0,<7",
+	"wasmtime>=37,<38",
+	"pycryptodome>=3.23,<4",
+	"aiortc==1.9",
+	"requests>=2.32,<3",
+	"av<17",
+	"aiohttp>=3.13,<=4",
+	"fastapi[standard]>=0.119,<1",
+	"opencv-python>=4.11,<5",
+	"httpx>=0.28,<1",
+	"qasync",
+	"PySide6>=6.6,<7",
+	"open3d>=0.19,<1",
+	"vtk",
+	"keyboard>=0.13,<1",
 ]
 
-# [tool.poetry.dependencies]
-# aioice = { source = "../my_local_package", develop = true }
+[project.scripts]
+go2_driver_node = "go2_robot_sdk.main:main"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

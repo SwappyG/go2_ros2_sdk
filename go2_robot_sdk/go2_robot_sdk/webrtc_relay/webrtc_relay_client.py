@@ -7,6 +7,7 @@ import contextlib
 import httpx
 import logging
 import argparse
+import threading
 import typing as t
 import sys
 import json
@@ -19,6 +20,17 @@ try:
 except ImportError:
     KEYBOARD_AVAILABLE = False
     keyboard = None
+
+try:
+    import rclpy
+    from rclpy.executors import SingleThreadedExecutor
+    from go2_robot_sdk.webrtc_relay.webrtc_relay_ros2_node import WebRTCRelayROS2Node
+    RCLPY_AVAILABLE = True
+except ImportError:
+    rclpy = None  # type: ignore
+    SingleThreadedExecutor = None  # type: ignore
+    WebRTCRelayROS2Node = None  # type: ignore
+    RCLPY_AVAILABLE = False
 
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_go2 import ConnectArgs
 from go2_robot_sdk.webrtc_relay.webrtc_relay_endpoint_webrtc import OfferArgs, OfferReply
@@ -50,7 +62,8 @@ class WebRTCRelayClient:
         on_robot_data: t.Callable[[RobotData], t.Coroutine[None, None, None]],
         on_video_track: t.Callable[[MediaStreamTrack], t.Coroutine[None, None, None]],
         on_lidar_frame: t.Callable[[dict[str, t.Any]], t.Coroutine[None, None, None]],
-        topics_to_subscribe_to: list[str] | None = None
+        topics_to_subscribe_to: list[str] | None = None,
+        enable_ros2_publish: bool = False,
     ):
         self.url = relay_url
         self.robot_config = robot_config
@@ -64,6 +77,32 @@ class WebRTCRelayClient:
         self._stats_monitor: WebRTCStatsMonitor | None = None
         self._topics_to_subscribe_to = topics_to_subscribe_to
 
+        self._ros2_node = None
+        self._ros2_executor = None
+        self._ros2_thread = None
+        if enable_ros2_publish and RCLPY_AVAILABLE and rclpy is not None and WebRTCRelayROS2Node is not None:
+            try:
+                if not rclpy.ok():
+                    rclpy.init()
+                self._ros2_node = WebRTCRelayROS2Node()
+                self._ros2_executor = SingleThreadedExecutor()
+                self._ros2_executor.add_node(self._ros2_node)
+
+                def _spin() -> None:
+                    try:
+                        self._ros2_executor.spin()
+                    except Exception as e:
+                        logger.warning("ROS2 relay node spin exited: %s", e)
+
+                self._ros2_thread = threading.Thread(target=_spin, daemon=True)
+                self._ros2_thread.start()
+                logger.info("ROS2 lidar publishing enabled on /go2/sensor_msgs/PointCloud2")
+            except Exception as e:
+                logger.warning("Failed to start ROS2 relay node for lidar publishing: %s", e)
+                self._ros2_node = None
+                self._ros2_executor = None
+                self._ros2_thread = None
+
     async def __aenter__(self):
         return self
     
@@ -75,9 +114,32 @@ class WebRTCRelayClient:
         if self._stats_monitor:
             await self._stats_monitor.stop()
             self._stats_monitor = None
-        
+
+        # Shut down ROS2 node and executor if we started them
+        if self._ros2_executor is not None and self._ros2_node is not None:
+            try:
+                self._ros2_executor.shutdown()
+                self._ros2_node.destroy_node()
+            except Exception as e:
+                logger.debug("ROS2 relay node shutdown: %s", e)
+            self._ros2_executor = None
+            self._ros2_node = None
+            self._ros2_thread = None
+
         with contextlib.suppress(Exception):
-            await self.client.aclose() 
+            await self.client.aclose()
+
+    def publish_lidar_pointcloud(self, lidar_frame: dict[str, t.Any]) -> None:
+        """
+        Publish a lidar_frame to ROS2 as PointCloud2 on /go2/sensor_msgs/PointCloud2.
+        No-op if ROS2 publishing was not enabled or the node is unavailable.
+        Safe to call from the GUI thread.
+        """
+        if self._ros2_node is not None:
+            try:
+                self._ros2_node.publish_lidar(lidar_frame)
+            except Exception as e:
+                logger.debug("publish_lidar_pointcloud failed: %s", e) 
 
     async def start(self, connect_go2: bool=True):
         logger.debug("webrtc relay client start")

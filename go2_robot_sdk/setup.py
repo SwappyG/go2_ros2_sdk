@@ -6,12 +6,31 @@ import os
 from glob import glob
 from setuptools import setup
 from setuptools import find_packages
+import pathlib
+import tomllib
 
 package_name = 'go2_robot_sdk'
 
+# Load metadata from pyproject.toml and convert to plain Python literals
+pyproject_path = pathlib.Path(__file__).parent / 'pyproject.toml'
+project_metadata = {}
+if pyproject_path.exists():
+    with pyproject_path.open('rb') as f:
+        data = tomllib.load(f)
+        project_metadata = data.get('project', {})
+
+def _console_scripts_from_pyproject(scripts_table: dict) -> list:
+    if not scripts_table:
+        return []
+    return [f"{name} = {ref}" for name, ref in scripts_table.items()]
+
 setup(
-    name=package_name,
-    version='0.0.0',
+    name=project_metadata.get('name', package_name),
+    version=project_metadata.get('version', '0.0.0'),
+    description=project_metadata.get('description', ''),
+    long_description=(pathlib.Path(project_metadata.get('readme', 'README.md')).read_text() if project_metadata.get('readme') else ''),
+    python_requires=project_metadata.get('requires-python'),
+    install_requires=project_metadata.get('dependencies', []),
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -28,15 +47,8 @@ setup(
 
 
     ],
-    install_requires=['setuptools'],
-    zip_safe=True,
-    maintainer='brimo',
-    maintainer_email='abizov94@gmail.com',
-    description='Go2 ROS2 SDK for Unitree Go2 Edu/Pro/Air models',
-    license='BSD-3-Clause',
     entry_points={
-        'console_scripts': [
-            'go2_driver_node = go2_robot_sdk.main:main',
-        ],
+        'console_scripts': _console_scripts_from_pyproject(project_metadata.get('scripts'))
     },
+    zip_safe=True,
 )

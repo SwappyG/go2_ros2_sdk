@@ -42,6 +42,9 @@ Examples:
   
   # With authentication token
   python launch_gui.py --token your_token_here
+
+  # Publish lidar to ROS2 /go2/sensor_msgs/PointCloud2
+  python launch_gui.py --publish-ros2
         """
     )
     
@@ -65,6 +68,12 @@ Examples:
         action="store_true",
         help="Only check requirements, don't launch"
     )
+    parser.add_argument(
+        "--publish-ros2",
+        action="store_true",
+        dest="publish_ros2",
+        help="Publish lidar to ROS2 topic /go2/sensor_msgs/PointCloud2"
+    )
     
     args = parser.parse_args()
     
@@ -81,6 +90,7 @@ Examples:
     print(f"  Relay Server: {args.api}")
     print(f"  Robot IP: {args.robot_ip}")
     print(f"  Token: {'<set>' if args.token else '<not set>'}")
+    print(f"  Publish ROS2: {getattr(args, 'publish_ros2', False)}")
     print()
     
     from go2_robot_sdk.webrtc_relay.gui_client import main as gui_main
@@ -92,6 +102,8 @@ Examples:
         "--robot-ip", args.robot_ip,
         "--token", args.token,
     ]
+    if getattr(args, "publish_ros2", False):
+        sys.argv.append("--publish-ros2")
     
     gui_main()
     return 0

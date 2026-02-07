@@ -1027,12 +1027,16 @@ class GO2GuiClient(QMainWindow):
             origin = tuple(meta["origin"])
             
             self.signals.lidar_update.emit(positions, face_count, resolution, origin)
+
+            if getattr(self, "client", None) is not None:
+                self.client.publish_lidar_pointcloud(lidar_frame)
         except Exception as e:
             logger.warning(f"Failed to handle lidar frame: {e}")
     
     def on_lidar_update(self, positions: npt.NDArray[np.uint8], face_count: int, resolution: float, origin: tuple[float, float, float]):
         """Update lidar widget."""
         self.lidar_widget.update_lidar_data(positions, face_count, resolution, origin)
+        # print(f"lidar update: {positions}, {face_count}, {resolution}, {origin}")
     
     def update_latest_lidar_frame(self, lidar_frame: dict[str, t.Any]) -> None:
         """Store the most recent lidar frame (called on GUI thread)."""
@@ -1055,7 +1059,7 @@ class GO2GuiClient(QMainWindow):
         """Update odometry widget and lidar robot pose."""
         self.odometry_widget.update_odometry(position, orientation)
         self.lidar_widget.update_robot_pose(position, orientation)
-    
+
     def closeEvent(self, event):
         """Handle window close event."""
         # Stop movement timer
@@ -1133,6 +1137,12 @@ def main():
     parser.add_argument("--api", default="http://localhost:8000", help="WebRTC relay server URL")
     parser.add_argument("--robot-ip", default="192.168.12.1", help="GO2 robot IP address")
     parser.add_argument("--token", default="", help="Robot authentication token")
+    parser.add_argument(
+        "--publish-ros2",
+        action="store_true",
+        dest="publish_ros2",
+        help="Publish lidar to ROS2 topic /go2/sensor_msgs/PointCloud2",
+    )
     args = parser.parse_args()
     
 
@@ -1193,6 +1203,7 @@ def main():
         on_robot_data=on_robot_data,
         on_video_track=on_video_track,
         on_lidar_frame=on_lidar_frame,
+        enable_ros2_publish=getattr(args, "publish_ros2", False),
     )
 
     window.add_client(client)
