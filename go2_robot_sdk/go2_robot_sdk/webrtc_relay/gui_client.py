@@ -972,7 +972,12 @@ class GO2GuiClient(QMainWindow):
                     robot_data.odometry_data.position,
                     robot_data.odometry_data.orientation
                 )
-            
+                if getattr(self, "client", None) is not None:
+                    self.client.publish_odometry_data(
+                        robot_data.odometry_data.position,
+                        robot_data.odometry_data.orientation,
+                    )
+
             # Handle other robot data fields (non-odometry)
             # Get all attributes of robot_data that are not private/internal
             robot_data_attrs = [attr for attr in dir(robot_data) 

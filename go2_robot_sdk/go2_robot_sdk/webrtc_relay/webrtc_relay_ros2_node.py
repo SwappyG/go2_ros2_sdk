@@ -3,7 +3,7 @@
 
 """
 ROS2 node for webrtc_relay: publishes lidar data as sensor_msgs/PointCloud2
-on /go2/sensor_msgs/PointCloud2. Instantiated and owned by WebRTCRelayClient.
+and odometry as nav_msgs/Odometry. Instantiated and owned by WebRTCRelayClient.
 """
 
 import logging
@@ -11,6 +11,7 @@ import typing as t
 
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 LIDAR_TOPIC = "/go2/sensor_msgs/PointCloud2"
 LIDAR_FRAME_ID = "lidar"
+ODOM_TOPIC = "/go2/nav_msgs/Odometry"
 
 
 class WebRTCRelayROS2Node(Node):
@@ -49,7 +51,38 @@ class WebRTCRelayROS2Node(Node):
             LIDAR_TOPIC,
             qos,
         )
+        self._odom_pub = self.create_publisher(
+            Odometry,
+            ODOM_TOPIC,
+            qos,
+        )
         self.get_logger().info(f"Publishing PointCloud2 on {LIDAR_TOPIC} (frame_id={LIDAR_FRAME_ID})")
+        self.get_logger().info(f"Publishing Odometry on {ODOM_TOPIC} (frame_id=odom)")
+
+    def publish_odometry(self, position: dict[str, float], orientation: dict[str, float]) -> None:
+        """
+        Publish nav_msgs/Odometry from position and orientation dicts.
+        position: {"x": float, "y": float, "z": float}
+        orientation: {"x": float, "y": float, "z": float, "w": float} (quaternion)
+        """
+        try:
+            odom_msg = Odometry()
+            odom_msg.header.stamp = self.get_clock().now().to_msg()
+            odom_msg.header.frame_id = "odom"
+            odom_msg.child_frame_id = "base_link"
+
+            odom_msg.pose.pose.position.x = float(position.get("x", 0.0))
+            odom_msg.pose.pose.position.y = float(position.get("y", 0.0))
+            odom_msg.pose.pose.position.z = float(position.get("z", 0.0))
+
+            odom_msg.pose.pose.orientation.x = float(orientation.get("x", 0.0))
+            odom_msg.pose.pose.orientation.y = float(orientation.get("y", 0.0))
+            odom_msg.pose.pose.orientation.z = float(orientation.get("z", 0.0))
+            odom_msg.pose.pose.orientation.w = float(orientation.get("w", 1.0))
+
+            self._odom_pub.publish(odom_msg)
+        except Exception as e:
+            logger.warning("Failed to publish odometry: %s", e)
 
     def publish_lidar(self, lidar_frame: dict[str, t.Any]) -> None:
         """

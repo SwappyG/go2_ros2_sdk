@@ -139,7 +139,19 @@ class WebRTCRelayClient:
             try:
                 self._ros2_node.publish_lidar(lidar_frame)
             except Exception as e:
-                logger.debug("publish_lidar_pointcloud failed: %s", e) 
+                logger.debug("publish_lidar_pointcloud failed: %s", e)
+
+    def publish_odometry_data(self, position: dict[str, float], orientation: dict[str, float]) -> None:
+        """
+        Publish odometry to ROS2 as nav_msgs/Odometry on /go2/nav_msgs/Odometry.
+        No-op if ROS2 publishing was not enabled or the node is unavailable.
+        Safe to call from the GUI thread.
+        """
+        if self._ros2_node is not None:
+            try:
+                self._ros2_node.publish_odometry(position, orientation)
+            except Exception as e:
+                logger.debug("publish_odometry_data failed: %s", e)
 
     async def start(self, connect_go2: bool=True):
         logger.debug("webrtc relay client start")
