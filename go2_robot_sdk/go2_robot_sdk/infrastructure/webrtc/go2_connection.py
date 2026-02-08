@@ -23,6 +23,7 @@ from go2_robot_sdk.infrastructure.webrtc.data_decoder import (
     WebRTCDataDecoder,
     DataDecodingError, #  # noqa: F401
 )
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer
 from go2_robot_sdk.domain.entities.robot_data import RobotData
 import go2_robot_sdk.infrastructure.webrtc.go2_message_parsers as go2_parsers
@@ -92,7 +93,7 @@ class Go2Connection:
         self.data_decoder = WebRTCDataDecoder(enable_lidar_decoding=decode_lidar)
         
         # Setup data channel
-        self.data_channel = self.pc.createDataChannel("data", id=0)
+        self.data_channel = self.pc.createDataChannel("data")
         self.data_channel.on("open", self.on_data_channel_open)
         self.data_channel.on("message", self.on_data_channel_message)
         
@@ -287,6 +288,20 @@ class Go2Connection:
         except Exception:
             logger.exception(f"Failed to set traffic saving")
             return False
+
+    #decrypt RSA key from firmware version >=1.1.8
+    def decrypt_con_notify_data(self, encrypted_b64: str) -> str:
+        key = bytes([232, 86, 130, 189, 22, 84, 155, 0, 142, 4, 166, 104, 43, 179, 235, 227])
+        data = base64.b64decode(encrypted_b64)
+        if len(data) < 28:
+            raise ValueError("Decryption failed: input data too short")
+        tag = data[-16:]
+        nonce = data[-28:-16]
+        ciphertext = data[:-28]
+        
+        aesgcm = AESGCM(key) 
+        plaintext = aesgcm.decrypt(nonce, ciphertext + tag, None)
+        return plaintext.decode('utf-8')
     
     async def connect(self) -> None:
         """Establish WebRTC connection to robot with full encryption"""
@@ -318,8 +333,12 @@ class Go2Connection:
             
             # Extract the 'data1' field from the JSON
             data1 = decoded_json.get('data1')
+            data2 = decoded_json.get('data2')
             if not data1:
                 raise Go2ConnectionError("No data1 field in public key response")
+
+            if data2 == 2:
+                data1 = self.decrypt_con_notify_data(data1)
             
             # Extract the public key from 'data1'
             public_key_pem = data1[10:len(data1)-10]
