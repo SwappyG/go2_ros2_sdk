@@ -41,7 +41,6 @@ OnVideoFrameCB: TypeAlias = Callable[
 class Go2ConnectionError(Exception):
     """Custom exception for Go2 connection errors"""
 
-
 class Go2Connection:
     """Full WebRTC connection to Go2 robot with encryption and proper signaling"""
     
