@@ -8,17 +8,19 @@ from pathlib import Path
 
 import go2_robot_sdk
 
+# When used as pure Python ( Poetry/pip ), package is not in ament index
+_pkg_root = Path(go2_robot_sdk.__file__).parent.parent
 try:
+    from ament_index_python.packages import PackageNotFoundError  # pyright: ignore[reportMissingImports]
     from ament_index_python import get_package_share_directory  # pyright: ignore[reportMissingImports]
+    try:
+        libs_path = os.path.join(get_package_share_directory('go2_robot_sdk'), 'external_lib')
+    except PackageNotFoundError:
+        libs_path = str(_pkg_root / 'external_lib')
 except ImportError:
-    get_package_share_directory = lambda _: str(Path(go2_robot_sdk.__file__).parent)
+    libs_path = str(_pkg_root / 'external_lib')
 
 logger = logging.getLogger(__name__)
-
-libs_path = os.path.join(
-    get_package_share_directory('go2_robot_sdk'),
-    'external_lib'
-)
 
 try:
     import aioice  # pyright: ignore[reportUnusedImport]
