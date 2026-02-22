@@ -13,11 +13,21 @@ from pydantic import BaseModel
 from pathlib import Path
 import go2_robot_sdk
 
-try:
-    from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
-except ImportError:
-    def get_package_share_directory() -> str:
-        return str(Path(go2_robot_sdk.__file__).parent)
+_pkg_root = Path(go2_robot_sdk.__file__).parent.parent
+
+
+def _get_package_share_directory() -> Path:
+    """Package root / share dir - works for pure Python (Poetry) or colcon install."""
+    try:
+        from ament_index_python.packages import PackageNotFoundError  # pyright: ignore[reportMissingImports]
+        from ament_index_python import get_package_share_directory  # pyright: ignore[reportMissingImports]
+        try:
+            return Path(get_package_share_directory('go2_robot_sdk'))
+        except PackageNotFoundError:
+            return _pkg_root
+    except ImportError:
+        return _pkg_root
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +56,7 @@ class CameraConfigLoader:
     
     def get_supported_resolutions(self) -> list[int]:
         """Get list of supported camera resolutions"""
-        calibration_dir = Path(get_package_share_directory()) / "calibration"
+        calibration_dir = _get_package_share_directory() / "calibration"
         
         files = calibration_dir.glob("front_camera_*.yaml")
         
@@ -69,7 +79,7 @@ class CameraConfigLoader:
         Returns:
             CameraInfo message or None if loading fails
         """
-        calibration_dir = Path(get_package_share_directory()) / "calibration"
+        calibration_dir = _get_package_share_directory() / "calibration"
         yaml_file = calibration_dir / f"front_camera_{height}.yaml"
             
         if not yaml_file.exists():

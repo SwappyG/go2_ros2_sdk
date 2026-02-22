@@ -16,11 +16,20 @@ import go2_robot_sdk
 from wasmtime import Config, Engine, Store, Module, Instance, Func, FuncType, ValType, Memory
 from go2_robot_sdk.infrastructure.sensors.lidar_decoder_result import DecodeResult
 
-try:
-    from ament_index_python.packages import get_package_share_directory  # pyright: ignore[reportMissingImports]
-except ImportError:
-    def get_package_share_directory() -> str:
-        return str(Path(go2_robot_sdk.__file__).parent)
+_pkg_root = Path(go2_robot_sdk.__file__).parent.parent
+
+
+def _get_package_share_directory() -> Path:
+    """Package root / share dir - works for pure Python (Poetry) or colcon install."""
+    try:
+        from ament_index_python.packages import PackageNotFoundError  # pyright: ignore[reportMissingImports]
+        from ament_index_python import get_package_share_directory  # pyright: ignore[reportMissingImports]
+        try:
+            return Path(get_package_share_directory('go2_robot_sdk'))
+        except PackageNotFoundError:
+            return _pkg_root
+    except ImportError:
+        return _pkg_root
 
 
 def update_meshes_for_cloud2(
@@ -79,7 +88,7 @@ class LidarDecoder:
         config.debug_info = True
         self.store = Store(Engine(config))
 
-        libvoxel_path = Path(get_package_share_directory()).parent / "external_lib" / "libvoxel.wasm"
+        libvoxel_path = _get_package_share_directory() / "external_lib" / "libvoxel.wasm"
         self.module = Module.from_file(self.store.engine, libvoxel_path)
 
         self.a_callback_type = FuncType([ValType.i32()], [ValType.i32()])
