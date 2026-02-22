@@ -29,7 +29,7 @@ def _get_package_share_directory() -> Path:
         return _pkg_root
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)    
 
 class GO2CameraInfoMatrix(BaseModel):
     rows: int
