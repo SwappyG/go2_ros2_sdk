@@ -172,9 +172,13 @@ class Go2Connection:
                 robot_data = go2_parsers.process_webrtc_message(raw_message_obj, self.robot_num)
             
             elif isinstance(message, bytes):
-                lidar_frame = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
-                if lidar_frame is not None:
-                    robot_data = go2_parsers.process_webrtc_message(lidar_frame, self.robot_num)
+                # NOTE: This rate throttling is a temporary hack, remove this
+                if time.time() - self._time_of_last_decode > 1.0:
+                    lidar_frame = legacy_deal_array_buffer(message, perform_decode=self.decode_lidar)
+                    if lidar_frame is not None:
+                        robot_data = go2_parsers.process_webrtc_message(lidar_frame, self.robot_num)
+                else:
+                    logger.info("skipping a frame")
                     
             else: 
                 logger.warning(f"unknown message type receieved from on_message callback. {message=}")
