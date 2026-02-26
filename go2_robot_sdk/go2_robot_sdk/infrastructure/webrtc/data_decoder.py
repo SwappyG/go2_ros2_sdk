@@ -13,7 +13,7 @@ from typing import Any  # pyright: ignore[reportUnusedImport]
 from go2_robot_sdk.infrastructure.sensors.lidar_decoder_result import DecodeResult
 try:
     # Use the working LidarDecoder from infrastructure
-    from go2_robot_sdk.infrastructure.sensors.lidar_decoder import LidarDecoder as OriginalLidarDecoder
+    from go2_robot_sdk.infrastructure.sensors.lidar_decoder_lz4 import LidarDecoder as OriginalLidarDecoder
 except ImportError:
     OriginalLidarDecoder = None
 
