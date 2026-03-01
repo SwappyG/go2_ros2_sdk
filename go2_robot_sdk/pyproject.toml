@@ -15,6 +15,7 @@ dependencies = [
     "pycryptodome >=3.23, < 4",
     "aiortc == 1.9",
     "requests >= 2.32, < 3",
+    "lz4 >=4.0, <5",
 ]
 
 [build-system]
