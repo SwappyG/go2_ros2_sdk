@@ -25,7 +25,7 @@ def parse_datachannel_message(raw_message: str) -> dict[str, Any]:
     
 def process_webrtc_message(msg: dict[str, Any], robot_id: str) -> RobotData | None:
     """Process WebRTC message"""
-    if msg['type'] != 'msg':
+    if msg['type'] not in ['msg', 'res']:
         logger.info(f"msg received on datachannel is not type 'msg': {msg=}")
         return None
 
