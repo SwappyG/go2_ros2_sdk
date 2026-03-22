@@ -13,25 +13,30 @@ import json
 import logging
 import time
 import base64
-from typing import Callable, Any, Coroutine, TypeAlias
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack  # type: ignore
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeAlias
+from types import TracebackType
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 
 from go2_robot_sdk.infrastructure.webrtc.crypto.encryption import CryptoUtils, ValidationCrypto, PathCalculator, EncryptionError
 from go2_robot_sdk.infrastructure.webrtc.http_client import HttpClient, WebRTCHttpError
 from go2_robot_sdk.infrastructure.webrtc.data_decoder import (
     WebRTCDataDecoder,
-    DataDecodingError, # pyright: ignore[reportUnusedImport]
+    DataDecodingError, #  # noqa: F401
 )
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer
 from go2_robot_sdk.domain.entities.robot_data import RobotData
 import go2_robot_sdk.infrastructure.webrtc.go2_message_parsers as go2_parsers
 
 logger = logging.getLogger(__name__)
 
-OnValidatedCB: TypeAlias = Callable[[str], None]
-OnMessageCB: TypeAlias = Callable[[RobotData], None]
-OnOpenCB: TypeAlias = Callable[[], None]
-OnVideoFrameCB: TypeAlias = Callable[[MediaStreamTrack, str], Coroutine[None, None, None]]
+OnValidatedCB: TypeAlias = Callable[[str], Coroutine[Any, None, None]]
+OnMessageCB: TypeAlias = Callable[[RobotData], Coroutine[Any, None, None]]
+OnOpenCB: TypeAlias = Callable[[], Any]
+OnVideoFrameCB: TypeAlias = Callable[
+    [MediaStreamTrack, str], Coroutine[Any, None, None]
+]
 
 
 class Go2ConnectionError(Exception):
@@ -46,8 +51,16 @@ class Go2Connection:
     encrypt_by_md5 = ValidationCrypto.encrypt_by_md5
     deal_array_buffer = staticmethod(legacy_deal_array_buffer)
 
-    __enter__ = lambda self: self
-    __exit__ = lambda self, type_, value, traceback: self.shutdown()
+    def __enter__(self):
+        return self
+
+    def __exit__(
+        self,
+        type_: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
+    ):
+        return self.disconnect()
 
     def __init__(
         self,
@@ -81,7 +94,7 @@ class Go2Connection:
         self.data_decoder = WebRTCDataDecoder(enable_lidar_decoding=decode_lidar)
         
         # Setup data channel
-        self.data_channel = self.pc.createDataChannel("data", id=0)
+        self.data_channel = self.pc.createDataChannel("data")
         self.data_channel.on("open", self.on_data_channel_open)
         self.data_channel.on("message", self.on_data_channel_message)
         
@@ -94,31 +107,32 @@ class Go2Connection:
         # Add video transceiver if video callback provided
         if self.on_video_frame:
             self.pc.addTransceiver("video", direction="recvonly")
-    
-    def on_connection_state_change(self) -> None:
+            logger.info("Added recvonly video transceiver to request video from server")
+
+    async def on_connection_state_change(self) -> None:
         """Handle peer connection state changes"""
         logger.info(f"Connection state is {self.pc.connectionState}")
-        
+
         # Note: Validation is handled after successful WebRTC connection
         # in the original implementation, not here
-    
-    def on_data_channel_open(self, *_args) -> None:
+
+    async def on_data_channel_open(self, *_args) -> None:
         """Handle data channel open event"""
         logger.info("Data channel is open")
         # Force data channel to open state if needed (workaround)
         if self.data_channel.readyState != "open":
-            self.data_channel._setReadyState("open")  # pyright: ignore[reportPrivateUsage]
+            self.data_channel._setReadyState("open")  # noqa: SLF001
         
         if self.on_open:
             self.on_open()
 
-    def on_data_channel_message(self, message: Any) -> None:
+    async def on_data_channel_message(self, message: Any) -> None:
         """Handle incoming data channel messages"""
         try:
             # if we got a message, we're definely connected. For some reason, the "open" hook
             # doesn't always fire. Let's force it here. 
             if self.data_channel.readyState != "open":
-                self.data_channel._setReadyState("open") # pyright: ignore[reportPrivateUsage]
+                self.data_channel._setReadyState("open") # noqa: SLF001
 
             logger.debug(f"Received message: {message=}. {self.data_channel.readyState=}")
 
@@ -127,8 +141,8 @@ class Go2Connection:
             raw_message_obj = None
             if not self.is_validated and isinstance(message, str):
                 raw_message_obj = go2_parsers.parse_datachannel_message(message)
-                if raw_message_obj['type'] == 'validation':
-                    self.validate_robot_conn(raw_message_obj['data'])
+                if raw_message_obj["type"] == "validation":
+                    await self.validate_robot_conn(raw_message_obj["data"])
                     return
 
             # if there's no callback, don't bother parsing
@@ -141,7 +155,11 @@ class Go2Connection:
             # then just forward what we got
             if not self._decode_message:
                 logger.debug(f"decode is set to false, sending raw message back")
-                self.on_message(RobotData(robot_id=self.robot_num, timestamp=0.0, raw_message=message))
+                await self.on_message(
+                    RobotData(
+                        robot_id=self.robot_num, timestamp=0.0, raw_message=message
+                    )
+                )
                 return
                 
             logger.debug(f"decode is set to true, decoding message")
@@ -168,10 +186,10 @@ class Go2Connection:
             
             if robot_data is not None:
                 robot_data.raw_message = message
-                self.on_message(robot_data)
-                
-        except Exception as exception:
-            logger.error(f"Error processing data channel message: {exception=}")
+                await self.on_message(robot_data)
+
+        except Exception:
+            logger.exception(f"Error processing data channel message")
     
     async def on_track(self, track: MediaStreamTrack) -> None:
         """Handle incoming media tracks (video)"""
@@ -182,39 +200,39 @@ class Go2Connection:
         logger.info(f"Received a video track: {track=}")
         if not self.on_video_frame:
             logger.warning(f"there's no callback registered to consume video track")
-            return
+            return None
         
         try:
             await self.on_video_frame(track, self.robot_num)
-        except Exception as exception:
-            logger.error(f"Error in video frame callback: {exception=}")
-    
-    def validate_robot_conn(self, message: str) -> None:
+        except Exception as exception:  # noqa: BLE001
+            logger.error(f"Error in video frame callback: {exception=}")  # noqa: TRY400
+
+    async def validate_robot_conn(self, message: str) -> None:
         """Handle robot validation response"""
         logger.info(f"received validation data: {message=}")
         try:
             if message == "Validation Ok.":
                 logger.info("Robot validation successful. Setting video to ON")
                 # Turn on video
-                self.publish("", "on", "vid")
-                
+                await self.publish("", "on", "vid")
+
                 self.is_validated = True
-                
+
                 if self.on_validated:
                     logger.info("validation hook registered, calling hook")
-                    self.on_validated(self.robot_num)
-                    
+                    await self.on_validated(self.robot_num)
+
             else:
                 logger.info("got validation key, encrypting and sending back")
                 # Send encrypted validation response
                 validation_key = message
                 encrypted_key = ValidationCrypto.encrypt_key(validation_key)
-                self.publish("", encrypted_key, "validation")
-                
-        except Exception as e:
-            logger.error(f"Error in robot validation: {e}")
-    
-    def publish(self, topic: str, data: Any, msg_type: str = "msg") -> None:
+                await self.publish("", encrypted_key, "validation")
+
+        except Exception:
+            logger.exception(f"Error in robot validation")
+
+    async def publish(self, topic: str, data: Any, msg_type: str = "msg") -> None:
         """
         Publish message to data channel.
         
@@ -230,29 +248,29 @@ class Go2Connection:
             payload = {
                 "type": msg_type,
                 "topic": topic,
-                "data": data
+                "data": data,
             }
-            logging.info(f"{payload=}")
+            logger.info(f"{payload=}")
             payload_str = json.dumps(payload)
-            logging.info(f"-> Sending message {payload_str}")
+            logger.info(f"-> Sending message {payload_str}")
             self.data_channel.send(payload_str)
-            
-        except Exception as e:
-            logger.error(f"Failed to publish message: {e=}")
-    
-    def publish_json_str(self, json_str: str) -> None:
+
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Failed to publish message: {e=}")  # noqa: TRY400
+
+    async def publish_json_str(self, json_str: str) -> None:
         try:
             if self.data_channel.readyState != "open":
                 logger.warning(f"Data channel is not open. State is {self.data_channel.readyState}")
                 return
             
-            logging.info(f"-> Sending raw json message {json_str=}")
+            logger.info(f"-> Sending raw json message {json_str=}")
             self.data_channel.send(json_str)
             
-        except Exception as e:
-            logger.error(f"Failed to publish message: {e}")
+        except Exception as e: # noqa: BLE001
+            logger.error(f"Failed to publish message: {e}")  # noqa: TRY400
 
-    async def disableTrafficSaving(self, switch: bool) -> bool:
+    async def disableTrafficSaving(self, switch: bool) -> bool:  # noqa: N802 // legacy
         """
         Disable traffic saving mode for better data transmission.
         Should be turned on when subscribed to ulidar topic.
@@ -266,120 +284,132 @@ class Go2Connection:
         try:
             data = {
                 "req_type": "disable_traffic_saving",
-                "instruction": "on" if switch else "off"
+                "instruction": "on" if switch else "off",
             }
-            
-            self.publish("", data, "rtc_inner_req")
+
+            await self.publish("", data, "rtc_inner_req")
             logger.info(f"DisableTrafficSaving: {data['instruction']}")
             return True
             
-        except Exception as e:
-            logger.error(f"Failed to set traffic saving: {e}")
+        except Exception:
+            logger.exception(f"Failed to set traffic saving")
             return False
+
+    #decrypt RSA key from firmware version >=1.1.8
+    def decrypt_con_notify_data(self, encrypted_b64: str) -> str:
+        key = bytes([232, 86, 130, 189, 22, 84, 155, 0, 142, 4, 166, 104, 43, 179, 235, 227])
+        data = base64.b64decode(encrypted_b64)
+        if len(data) < 28:
+            raise ValueError("Decryption failed: input data too short")
+        tag = data[-16:]
+        nonce = data[-28:-16]
+        ciphertext = data[:-28]
+        
+        aesgcm = AESGCM(key) 
+        plaintext = aesgcm.decrypt(nonce, ciphertext + tag, None)
+        return plaintext.decode('utf-8')
     
     async def connect(self) -> None:
         """Establish WebRTC connection to robot with full encryption"""
+        logger.info("Trying to send SDP using full encrypted method...")
+        
+        # Step 1: Create WebRTC offer
+        offer = await self.pc.createOffer()
+        await self.pc.setLocalDescription(offer)
+        
+        sdp_offer = self.pc.localDescription
+        sdp_offer_json = {
+            "id": "STA_localNetwork",
+            "sdp": sdp_offer.sdp,
+            "type": sdp_offer.type,
+            "token": self.token,
+        }
+        
+        new_sdp = json.dumps(sdp_offer_json)
+        
+        # Step 2: Get robot's public key
         try:
-            logger.info("Trying to send SDP using full encrypted method...")
+            response = self.http_client.get_robot_public_key(self.robot_ip)
+            if not response:
+                raise Go2ConnectionError("Failed to get public key response")
             
-            # Step 1: Create WebRTC offer
-            offer = await self.pc.createOffer()
-            await self.pc.setLocalDescription(offer)
+            # Decode the response text from base64
+            decoded_response = base64.b64decode(response.text).decode('utf-8')
+            decoded_json = json.loads(decoded_response)
             
-            sdp_offer = self.pc.localDescription
-            sdp_offer_json = {
-                "id": "STA_localNetwork",
-                "sdp": sdp_offer.sdp,
-                "type": sdp_offer.type,
-                "token": self.token
+            # Extract the 'data1' field from the JSON
+            data1 = decoded_json.get('data1')
+            data2 = decoded_json.get('data2')
+            if not data1:
+                raise Go2ConnectionError("No data1 field in public key response")
+
+            if data2 == 2:
+                data1 = self.decrypt_con_notify_data(data1)
+            
+            # Extract the public key from 'data1'
+            public_key_pem = data1[10:len(data1)-10]
+            path_ending = PathCalculator.calc_local_path_ending(data1)
+            
+            logger.info(f"Extracted path ending: {path_ending}")
+            
+        except (WebRTCHttpError, EncryptionError) as e:
+            raise Go2ConnectionError(f"Failed to get robot public key: {e}") from e
+        
+        # Step 3: Encrypt and send SDP
+        try:
+            # Generate AES key
+            aes_key = CryptoUtils.generate_aes_key()
+            
+            # Load Public Key
+            public_key = CryptoUtils.rsa_load_public_key(public_key_pem)
+            
+            # Encrypt the SDP and AES key
+            encrypted_body = {
+                "data1": CryptoUtils.aes_encrypt(new_sdp, aes_key),
+                "data2": CryptoUtils.rsa_encrypt(aes_key, public_key),
             }
             
-            new_sdp = json.dumps(sdp_offer_json)
+            # Send the encrypted data
+            response = self.http_client.send_encrypted_sdp(
+                self.robot_ip, path_ending, encrypted_body,
+            )
             
-            # Step 2: Get robot's public key
-            try:
-                response = self.http_client.get_robot_public_key(self.robot_ip)
-                if not response:
-                    raise Go2ConnectionError("Failed to get public key response")
-                
-                # Decode the response text from base64
-                decoded_response = base64.b64decode(response.text).decode('utf-8')
-                decoded_json = json.loads(decoded_response)
-                
-                # Extract the 'data1' field from the JSON
-                data1 = decoded_json.get('data1')
-                if not data1:
-                    raise Go2ConnectionError("No data1 field in public key response")
-                
-                # Extract the public key from 'data1'
-                public_key_pem = data1[10:len(data1)-10]
-                path_ending = PathCalculator.calc_local_path_ending(data1)
-                
-                logger.info(f"Extracted path ending: {path_ending}")
-                
-            except (WebRTCHttpError, EncryptionError) as e:
-                raise Go2ConnectionError(f"Failed to get robot public key: {e}")
+            if not response:
+                raise Go2ConnectionError("Failed to send encrypted SDP")
             
-            # Step 3: Encrypt and send SDP
-            try:
-                # Generate AES key
-                aes_key = CryptoUtils.generate_aes_key()
-                
-                # Load Public Key
-                public_key = CryptoUtils.rsa_load_public_key(public_key_pem)
-                
-                # Encrypt the SDP and AES key
-                encrypted_body = {
-                    "data1": CryptoUtils.aes_encrypt(new_sdp, aes_key),
-                    "data2": CryptoUtils.rsa_encrypt(aes_key, public_key),
-                }
-                
-                # Send the encrypted data
-                response = self.http_client.send_encrypted_sdp(
-                    self.robot_ip, path_ending, encrypted_body
-                )
-                
-                if not response:
-                    raise Go2ConnectionError("Failed to send encrypted SDP")
-                
-                # Decrypt the response
-                decrypted_response = CryptoUtils.aes_decrypt(response.text, aes_key)
-                peer_answer = json.loads(decrypted_response)
-                
-                # Set remote description
-                answer = RTCSessionDescription(
-                    sdp=peer_answer['sdp'], 
-                    type=peer_answer['type']
-                )
-                await self.pc.setRemoteDescription(answer)
-                
-                logger.info(f"Successfully established WebRTC connection to robot {self.robot_num}")
-                
-            except (WebRTCHttpError, EncryptionError) as e:
-                raise Go2ConnectionError(f"Failed to complete encrypted handshake: {e}")
+            # Decrypt the response
+            decrypted_response = CryptoUtils.aes_decrypt(response.text, aes_key)
+            peer_answer = json.loads(decrypted_response)
             
-        except Go2ConnectionError:
-            raise
-        except Exception as e:
-            raise Go2ConnectionError(f"Unexpected error during connection: {e}")
+            # Set remote description
+            answer = RTCSessionDescription(
+                sdp=peer_answer['sdp'], 
+                type=peer_answer['type'],
+            )
+            await self.pc.setRemoteDescription(answer)
+            
+            logger.info(f"Successfully established WebRTC connection to robot {self.robot_num}")
+            
+        except (WebRTCHttpError, EncryptionError) as e:
+            raise Go2ConnectionError(f"Failed to complete encrypted handshake: {e}") from e
     
     async def disconnect(self) -> None:
         """Close WebRTC connection and cleanup resources"""
         try:
             # Close peer connection
             await self.pc.close()
-        except Exception as e:
-            logger.error(f"error closing peer connection: {e=}")
+        except Exception:
+            logger.exception(f"error closing peer connection")
             
         try:
             self.data_channel.close()
-        except Exception as e:
-            logger.error(f"error closing peer connection datachannel: {e=}")
+        except Exception:
+            logger.exception(f"error closing peer connection datachannel")
         
         try:
             self.http_client.close()
-        except Exception as e:
-            logger.error(f"error closing http client: {e=}")
+        except Exception:
+            logger.exception(f"error closing http client")
             
         logger.info(f"Disconnected from robot {self.robot_num}")
             

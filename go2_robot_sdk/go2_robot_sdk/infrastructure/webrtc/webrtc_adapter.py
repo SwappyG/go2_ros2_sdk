@@ -4,7 +4,7 @@
 import asyncio
 import json
 import logging
-from typing import Dict, Any
+from typing import Any, Callable
 
 
 
@@ -17,8 +17,8 @@ from go2_robot_sdk.domain.interfaces.robot_controller import IRobotController
 from go2_robot_sdk.infrastructure.webrtc.go2_connection import (
     Go2Connection,
     OnValidatedCB,
-    OnMessageCB,  # pyright: ignore[reportUnusedImport]
-    OnOpenCB, # pyright: ignore[reportUnusedImport]
+    OnMessageCB,
+    OnOpenCB, # noqa: F401
     OnVideoFrameCB,
 )
 from go2_robot_sdk.application.utils.command_generator import gen_command, gen_mov_command
@@ -31,13 +31,14 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
     def __init__(
         self, 
         config: RobotConfig, 
-        on_validated_callback: OnValidatedCB, 
-        on_data_callback: OnMessageCB,
+        on_validated_callback: Callable[[str], Any], 
+        on_data_callback: Callable[[RobotData], Any],
         on_video_frame_callback: OnVideoFrameCB | None = None, 
-        event_loop: asyncio.AbstractEventLoop | None = None
+        event_loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.config = config
-        self.connections: Dict[str, Go2Connection] = {}
+        self.connections: dict[str, Go2Connection] = {}
+        
         self.data_callback = on_data_callback
         self.webrtc_msgs = asyncio.Queue[str]()
         self.on_validated_callback = on_validated_callback
@@ -56,13 +57,13 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
         try:
             robot_idx = int(robot_id)
             robot_ip = self.config.robot_ip_list[robot_idx]
-            
+
             conn = Go2Connection(
                 robot_ip=robot_ip,
                 robot_num=int(robot_id),
                 token=self.config.token,
                 on_validated=self._on_validated,
-                on_message=self._on_data_channel_message, # type: ignore
+                on_message=self._on_data_channel_message,
                 on_video_frame=self.on_video_frame_callback if self.config.enable_video else None,
                 decode_lidar=self.config.decode_lidar,
             )
@@ -73,8 +74,8 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             
             logger.info(f"Connected to robot {robot_id} at {robot_ip}")
             
-        except Exception as e:
-            logger.error(f"Failed to connect to robot {robot_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to connect to robot {robot_id}")
             raise
 
     async def disconnect(self, robot_id: str) -> None:
@@ -89,10 +90,10 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                     await connection.pc.close()
                 del self.connections[robot_id]
                 logger.info(f"Disconnected from robot {robot_id}")
-            except Exception as e:
-                logger.error(f"Error disconnecting from robot {robot_id}: {e}")
+            except Exception:
+                logger.exception(f"Error disconnecting from robot {robot_id}")
 
-    def set_data_callback(self, callback: OnMessageCB) -> None:
+    def set_data_callback(self, callback: Callable[[RobotData], Any]) -> None:
         """Set callback for data reception"""
         self.data_callback = callback
 
@@ -108,7 +109,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                         # Schedule the coroutine in the existing loop
                         asyncio.run_coroutine_threadsafe(
                             self._async_send_command(connection, command),
-                            loop
+                            loop,
                         )
                     else:
                         # Fallback to synchronous send
@@ -116,10 +117,10 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                     logger.debug(f"Command sent to robot {robot_id}: {command[:50]}")
                 else:
                     logger.warning(f"No data channel available for robot {robot_id}")
-            except Exception as e:
-                logger.error(f"Error sending command to robot {robot_id}: {e}")
+            except Exception:
+                logger.exception(f"Error sending command to robot {robot_id}")
 
-    def _get_or_create_event_loop(self):
+    def _get_or_create_event_loop(self) -> asyncio.AbstractEventLoop | None:
         """Get existing event loop or return the main loop"""
         # First try to get the current loop
         try:
@@ -189,7 +190,7 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
             except asyncio.QueueEmpty:
                 break
 
-    def _on_validated(self, robot_id: str) -> None:
+    async def _on_validated(self, robot_id: str) -> None:
         """Callback after connection validation"""
         try:
             if robot_id in self.connections:
@@ -197,15 +198,15 @@ class WebRTCAdapter(IRobotDataReceiver, IRobotController):
                     self.connections[robot_id].data_channel.send(
                         json.dumps({"type": "subscribe", "topic": topic}))
             
-            self.on_validated_callback(robot_id)
+            await asyncio.to_thread(self.on_validated_callback, robot_id)
                 
         except Exception as e:
             logger.error(f"Error in validated callback: {e}")
 
-    def _on_data_channel_message(self, msg: RobotData) -> None:
+    async def _on_data_channel_message(self, msg: RobotData) -> None:
         """Handle incoming data channel messages"""
         try:
-            self.data_callback(msg)
+            await asyncio.to_thread(self.data_callback, msg)
         
         except Exception as e:
             logger.error(f"Error processing data channel message: {e}") 

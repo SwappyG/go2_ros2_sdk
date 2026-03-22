@@ -9,7 +9,7 @@ Contains functions to create properly formatted WebRTC commands.
 import datetime
 import json
 import random
-from typing import Any, Optional, Union
+from typing import Any
 
 # Topic constants for different command types
 SPORT_MODE_TOPIC = "rt/api/sport/request"
@@ -18,16 +18,16 @@ OBSTACLE_AVOIDANCE_TOPIC = "rt/api/obstacles_avoid/request"
 
 def generate_id() -> int:
     """Generate a unique command ID based on timestamp and random number"""
-    timestamp_part = int(datetime.datetime.now().timestamp() * 1000 % 2147483648)
-    random_part = random.randint(0, 999)
+    timestamp_part = int(datetime.datetime.now().astimezone().timestamp() * 1000 % 2147483648)
+    random_part = random.randint(0, 999)  # noqa: S311
     return timestamp_part + random_part
 
 
 def create_command_structure(
         api_id: int, 
-        parameter: Union[str, dict[str, Any]], 
+        parameter: str | dict[str, Any], 
         topic: str = SPORT_MODE_TOPIC,
-        command_id: Optional[int] = None
+        command_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Create a standardized command structure for WebRTC communication.
@@ -53,19 +53,19 @@ def create_command_structure(
             "header": {
                 "identity": {
                     "id": final_id,
-                    "api_id": api_id
-                }
+                    "api_id": api_id,
+                },
             },
-            "parameter": param_str
-        }
+            "parameter": param_str,
+        },
     }
 
 
 def gen_command(
         cmd: int,
-        parameters: Optional[Union[str, dict[str, Any]]] = None,
-        topic: Optional[str] = None,
-        command_id: Optional[int] = None
+        parameters: str | dict[str, Any] | None = None,
+        topic: str | None = None,
+        command_id: int | None = None,
 ) -> str:
     """
     Generate a general robot command.
@@ -93,7 +93,7 @@ def gen_mov_command(
         x: float,
         y: float, 
         z: float,
-        obstacle_avoidance: bool = False
+        obstacle_avoidance: bool = False,
 ) -> str:
     """
     Generate a movement command for the robot.

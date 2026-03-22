@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from collections.abc import Callable
 from go2_robot_sdk.domain.entities.robot_data import RobotData
 
 class IRobotDataReceiver(ABC):

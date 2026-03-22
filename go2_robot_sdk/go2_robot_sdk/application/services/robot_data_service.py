@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Dict, Any
+from typing import Any
 
 from go2_robot_sdk.domain.entities.robot_data import RobotData, RobotState, IMUData, OdometryData, JointData, LidarData
 from go2_robot_sdk.domain.interfaces.robot_data_publisher import IRobotDataPublisher
@@ -44,7 +44,7 @@ class RobotDataService:
         except Exception as e:
             logger.error(f"Error processing WebRTC message: {e}")
 
-    def _process_lidar_data(self, msg: Dict[str, Any], robot_data: RobotData) -> None:
+    def _process_lidar_data(self, msg: dict[str, Any], robot_data: RobotData) -> None:
         """Process lidar data"""
         try:
             decoded_data = msg.get("decoded_data", {})
@@ -63,7 +63,7 @@ class RobotDataService:
         except Exception as e:
             logger.error(f"Error processing lidar data: {e}")
 
-    def _process_odometry_data(self, msg: Dict[str, Any], robot_data: RobotData) -> None:
+    def _process_odometry_data(self, msg: dict[str, Any], robot_data: RobotData) -> None:
         """Process odometry data"""
         try:
             pose_data = msg['data']['pose']
@@ -85,7 +85,7 @@ class RobotDataService:
         except Exception as e:
             logger.error(f"Error processing odometry data: {e}")
 
-    def _process_sport_mode_state(self, msg: Dict[str, Any], robot_data: RobotData) -> None:
+    def _process_sport_mode_state(self, msg: dict[str, Any], robot_data: RobotData) -> None:
         """Process sport mode state"""
         try:
             data = msg["data"]
@@ -133,7 +133,7 @@ class RobotDataService:
         except Exception as e:
             logger.error(f"Error processing sport mode state: {e}")
 
-    def _process_low_state(self, msg: Dict[str, Any], robot_data: RobotData) -> None:
+    def _process_low_state(self, msg: dict[str, Any], robot_data: RobotData) -> None:
         """Process low state data"""
         try:
             low_state_data = msg['data']

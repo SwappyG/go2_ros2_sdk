@@ -27,7 +27,7 @@ class RobotControlService:
                     round(x, 2), 
                     round(y, 2), 
                     round(z, 2), 
-                    obstacle_avoidance
+                    obstacle_avoidance,
                 )
                 self.controller.send_movement_command(robot_id, x, y, z)
         except Exception as e:
@@ -35,6 +35,7 @@ class RobotControlService:
 
     def handle_webrtc_request(self, api_id: int, parameter_str: str, topic: str, msg_id: str, robot_id: str) -> None:
         """Process WebRTC request"""
+        _ = msg_id
         try:
             parameter = "" if parameter_str == "" else json.loads(parameter_str)
             self.controller.send_webrtc_request(robot_id, api_id, parameter, topic)
