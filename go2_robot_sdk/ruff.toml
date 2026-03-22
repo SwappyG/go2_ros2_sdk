@@ -12,19 +12,11 @@ include = [
 ]
 
 exclude = [
-    "go2_robot_sdk/launch/**",
     "go2_robot_sdk/meshes/**",
-    "go2_robot_sdk/resources/**",
     "go2_robot_sdk/urdf/**",
     "go2_robot_sdk/external_lib/**",
     "go2_robot_sdk/dae/**",
-    "go2_robot_sdk/config/**",
     "go2_robot_sdk/calibration/**",
-    "go2_robot_sdk/application/services/**",
-    "go2_robot_sdk/presentation/**",
-    "go2_robot_sdk/infrastructure/ros2/**",
-    "go2_robot_sdk/infrastructure/webrtc/webrtc_adapter.py",
-    "go2_robot_sdk/main.py"
 ]
 
 [lint]
@@ -48,8 +40,7 @@ ignore = [
     "COM812", # missing-trailing-comma
 
     # too-many-X
-    "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0916", "PLR0917",
-    "PLR1714", # merge comparisions
+    "PLR",
 
     "TRY003", # don't use exception messages, seems like a bad rule 
     "TRY300", # else-suggestion. way too opinionated
@@ -60,51 +51,12 @@ ignore = [
     "F541", "G004", "EM101", "EM102", # f-string without args / f-strings in logging
     
     # return statement related. opinionated, sometimes its nice to name things or be explicit
-    "RET504", # unnecessary assign before return. Sometimes its nice to name something before returning
-    "RET501", # don't return None, useless
+    "RET",
 
     "TC006", # use quotes in typing.cast, purely stylistic
-    "C901", # too many branches, seems unnecessary
+    "C",
     "N818", # no-Error-suffix on new exceptions. It's better we don't do this to avoid collisions with builtins
     
-    # pytest
-    "PT003", # warning that specifying scope=function is redunant. Sometimes its nice to be explicit
-
-
-    # Things to enable when we reach some level of sophistication
-    # "TC001", "TC002", "TC003", # improves import hygiene
-    # "PLR2004", # magic value comparison
-    # "PYI034", # use Self return instead of hardcoding
-    # "BLE001", # broad exception caught. This is bad, but work to implement consistently
-    # SIM
-    # ERA001, # commented out code detector. we don't really want messy commented out code in our codebase
-    # "PERF", # flags non-performant code patterns. good to eliminate these
-    # "PT011" # broad raises in pytests could be error prone. Add once we start writing more tests
-    # FBT, # this catches some bad usages of booleans in functions
+    "PT",
 ]
 
-[lint.per-file-ignores]
-"**/tests/*" = [
-    # Ignore specific rules
-    "S101",   # Use of assert
-    "ANN001",  # arg annotation
-    "ARG001",  # unused args
-    "PERF",
-    "S110", # try-except-pass
-    "PLR2004", # magic numbers
-    "T201", # print is ok
-]
-"**/conftest.py" = [
-    # Ignore specific rules
-    "S101",   # Use of assert
-    "ANN001",  # arg annotation
-    "ARG001",  # unused args
-    "PERF",
-    "S110", # try-except-pass
-    "PLR2004", # magic numbers
-    "T201", # print is ok
-]
-"parapro_app/parapro/core/qt/**" = [
-    "PGH003", # this folder is full of blanket ignores. Maybe disable one day
-]
-"parapro_app/parapro/core/cad/step.py" = ["ALL"]
