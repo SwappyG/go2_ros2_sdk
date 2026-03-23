@@ -9,6 +9,7 @@ https://github.com/legion1581/go2_webrtc_connect
 Big thanks to @tfoldi (Földi Tamás) and @legion1581 (The RoboVerse Discord Group)
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -320,12 +321,22 @@ class Go2Connection:
             "type": sdp_offer.type,
             "token": self.token,
         }
+
+        # NOTE: self.pc.setLocaDescription() kicks off some async tasks internally
+        # they must complete before we call setRemoteDescription(). Its not clear
+        # how we ensure this, but having any non-async function blocking the asyncio
+        # event loop causes issues. Both http_client calls are sync and MUST be 
+        # call with asyncio.to_thread(). We may want to add an asyncio.sleep(...)
+        # here as well to ensure the internal async tasks complete. If you see weird 
+        # errors related to "media" being None, then this is the issue.
         
         new_sdp = json.dumps(sdp_offer_json)
         
         # Step 2: Get robot's public key
         try:
-            response = self.http_client.get_robot_public_key(self.robot_ip)
+            response = await asyncio.to_thread(
+                self.http_client.get_robot_public_key, self.robot_ip,
+            )
             if not response:
                 raise Go2ConnectionError("Failed to get public key response")
             
@@ -366,7 +377,8 @@ class Go2Connection:
             }
             
             # Send the encrypted data
-            response = self.http_client.send_encrypted_sdp(
+            response = await asyncio.to_thread(
+                self.http_client.send_encrypted_sdp,
                 self.robot_ip, path_ending, encrypted_body,
             )
             

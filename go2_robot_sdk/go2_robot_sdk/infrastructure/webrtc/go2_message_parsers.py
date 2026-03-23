@@ -61,7 +61,8 @@ def parse_lidar_data(message: dict[str, Any]) -> LidarData | None:
         data = message['data']
         
         return LidarData(
-            positions=decoded_data["positions"],
+            positions=decoded_data.get("positions", None),
+            points=decoded_data.get("points", None),
             uvs=decoded_data.get("uvs"),
             resolution=data.get("resolution", 0.0),
             origin=list(data.get("origin", [0.0, 0.0, 0.0])),

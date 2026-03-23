@@ -47,11 +47,12 @@ class JointData:
 @dataclass
 class LidarData:
     """LiDAR sensor data"""
-    positions: npt.NDArray[np.uint8]
     uvs: npt.NDArray[np.uint8]
     resolution: float
     origin: list[float]
     stamp: float
+    positions: npt.NDArray[np.uint8] | None = None
+    points: npt.NDArray[np.uint8] | None = None
     width: list[int] | None = None
     src_size: int | None = None
     compressed_data: bytes | None = None
