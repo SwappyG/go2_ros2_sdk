@@ -56,7 +56,6 @@ def parse_lidar_data(message: dict[str, Any]) -> LidarData | None:
     try:
         decoded_data = message['decoded_data']
         if decoded_data is None:
-            logger.warning(f"failed to decode lidar message from go2 datachannel")
             return None
         
         data = message['data']
