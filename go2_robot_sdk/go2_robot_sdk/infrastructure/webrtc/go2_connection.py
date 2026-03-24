@@ -240,16 +240,15 @@ class Go2Connection:
         """
         try:
             if self.data_channel.readyState != "open":
-                logger.info("not ready, not sending")
+                logger.warning("not ready, not sending")
                 return
             payload = {
                 "type": msg_type,
                 "topic": topic,
                 "data": data,
             }
-            logger.info(f"{payload=}")
             payload_str = json.dumps(payload)
-            logger.info(f"-> Sending message {payload_str}")
+            logger.debug(f"-> Sending message {payload_str}")
             self.data_channel.send(payload_str)
 
         except Exception as e:  # noqa: BLE001
@@ -261,7 +260,7 @@ class Go2Connection:
                 logger.warning(f"Data channel is not open. State is {self.data_channel.readyState}")
                 return
             
-            logger.info(f"-> Sending raw json message {json_str=}")
+            logger.debug(f"-> Sending raw json message {json_str=}")
             self.data_channel.send(json_str)
             
         except Exception as e: # noqa: BLE001
