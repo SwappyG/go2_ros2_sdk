@@ -27,13 +27,13 @@ from go2_robot_sdk.infrastructure.webrtc.data_decoder import (
 )
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from go2_robot_sdk.infrastructure.webrtc.data_decoder import deal_array_buffer as legacy_deal_array_buffer
-from go2_robot_sdk.domain.entities.robot_data import RobotData
+import go2_robot_sdk.domain.entities.robot_data as rd
 import go2_robot_sdk.infrastructure.webrtc.go2_message_parsers as go2_parsers
 
 logger = logging.getLogger(__name__)
 
 OnValidatedCB: TypeAlias = Callable[[str], Coroutine[Any, None, None]]
-OnMessageCB: TypeAlias = Callable[[RobotData], Coroutine[Any, None, None]]
+OnMessageCB: TypeAlias = Callable[[rd.RobotDataWithRawMessage], Coroutine[Any, None, None]]
 OnOpenCB: TypeAlias = Callable[[], Any]
 OnVideoFrameCB: TypeAlias = Callable[
     [MediaStreamTrack, str], Coroutine[Any, None, None]
@@ -157,14 +157,18 @@ class Go2Connection:
             if not self._decode_message:
                 logger.debug(f"decode is set to false, sending raw message back")
                 await self.on_message(
-                    RobotData(
-                        robot_id=self.robot_num, timestamp=0.0, raw_message=message
+                    rd.RobotDataWithRawMessage(
+                        robot_id=self.robot_num, 
+                        robot_data=None,
+                        timestamp=0.0, 
+                        raw_message=message
                     )
                 )
                 return
                 
             logger.debug(f"decode is set to true, decoding message")
             robot_data = None
+            lidar_frame: dict[str, Any] | None = None
             if isinstance(message, str):
                 # we may have already parsed the data during the validation step. If not tho, parse 
                 # it now
@@ -181,9 +185,14 @@ class Go2Connection:
                 logger.warning(f"unknown message type receieved from on_message callback. {message=}")
                 return
             
-            if robot_data is not None:
-                robot_data.raw_message = message
-                await self.on_message(robot_data)
+            if robot_data is not None or lidar_frame is not None:
+                await self.on_message(rd.RobotDataWithRawMessage(
+                    robot_id=self.robot_num,
+                    robot_data=robot_data,
+                    raw_message=message,
+                    timestamp=0.0,
+
+                ))
 
         except Exception:
             logger.exception(f"Error processing data channel message")
