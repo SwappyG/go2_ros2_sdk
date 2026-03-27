@@ -20,7 +20,8 @@ def parse_datachannel_message(raw_message: str) -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"go2 datachannel message had unexcepted form. {raw_message=}")
         raise ValueError("Failed to decode JSON message") from e
-    
+
+
 def process_webrtc_message(
     msg: dict[str, Any], robot_id: str
 ) -> rd.RobotOdom | rd.LowState | rd.MultipleState | rd.SportModeState | rd.LidarData | None:
@@ -43,12 +44,14 @@ def process_webrtc_message(
         return rd.LowState.model_validate(msg['data'])
 
     elif topic == RTC_TOPIC["MULTIPLE_STATE"]:
-        return rd.MultipleState.model_validate(msg['data'])
+        if isinstance(msg['data'], str):
+            return rd.MultipleState.model_validate_json(msg['data'])
+        else:
+            return rd.MultipleState.model_validate(msg['data'])
 
     else:
         return None
-    
-    return robot_data
+
 
 def parse_lidar_data(message: dict[str, Any]) -> rd.LidarData | None:
     """Process lidar data"""
@@ -76,78 +79,3 @@ def parse_lidar_data(message: dict[str, Any]) -> rd.LidarData | None:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Error processing lidar data: {e=}")
         return None
-
-# def parse_odometry_data(data: dict[str, Any]) -> OdometryData | None:
-#     """Process odometry data"""
-#     try:
-#         pose_data = data['pose']
-#         position = pose_data['position']
-#         orientation = pose_data['orientation']
-
-#         # Data validation
-#         pos_vals = [position['x'], position['y'], position['z']]
-#         rot_vals = [orientation['x'], orientation['y'], orientation['z'], orientation['w']]
-
-#         if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos_vals + rot_vals):
-#             logger.warning("Invalid odometry data - skipping")
-#             return None
-
-#         return OdometryData(
-#             position=position,
-#             orientation=orientation,
-#         )
-#     except (KeyError, ValueError) as e:
-#         logger.warning(f"failed to parse odometry data. {data=}", exc_info=e)
-#         return None
-
-# def parse_sport_mode_state(data: dict[str, Any]) -> tuple[RobotState, IMUData] | None:
-#     """Process sport mode state"""
-#     try:
-#         robot_state = RobotState(
-#             mode=data["mode"],
-#             progress=data["progress"],
-#             gait_type=data["gait_type"],
-#             position=_validated_float_list(data["position"]),
-#             body_height=_validated_float(data["body_height"]),
-#             velocity=data["velocity"],
-#             range_obstacle=_validated_float_list(data["range_obstacle"]),
-#             foot_force=data["foot_force"],
-#             foot_position_body=_validated_float_list(data["foot_position_body"]),
-#             foot_speed_body=_validated_float_list(data["foot_speed_body"]),
-#         )
-        
-#         imu_dict = data['imu_state']
-#         imu_data = IMUData(
-#             quaternion=_validated_float_list(imu_dict["quaternion"]),
-#             accelerometer=_validated_float_list(imu_dict["accelerometer"]),
-#             gyroscope=_validated_float_list(imu_dict["gyroscope"]),
-#             rpy=_validated_float_list(imu_dict["rpy"]),
-#             temperature=imu_dict["temperature"],
-#         )
-
-#         return robot_state, imu_data
-#     except (KeyError, ValueError) as e:
-#         logger.warning(f"failed to parse sport mode data", exc_info=e)
-#         return None
-
-# def parse_low_state(low_state_data: dict[str, Any]) -> JointData | None:
-#     """Process low state data"""
-#     try:
-#         return JointData(motor_state=low_state_data['motor_state'])
-#     except (KeyError, ValueError):
-#         logger.exception(f"Error processing low state:")
-
-# def parse_multiple_state(multiple_state_data: dict[str, Any]):
-#     pass
-
-# def _validated_float_list(data: list[Any]) -> list[float]:
-#     """Validate a list of float values"""
-#     if all(isinstance(x, (int, float)) and math.isfinite(x) for x in data):
-#         return data
-#     raise ValueError(f"list was not all floats or finite. {data=}")
-
-# def _validated_float(value: Any) -> float:
-#     """Validate a float value"""
-#     if isinstance(value, (int, float)) and math.isfinite(value):
-#         return float(value)
-#     raise ValueError(f"value isn't int or float, {value=}")
