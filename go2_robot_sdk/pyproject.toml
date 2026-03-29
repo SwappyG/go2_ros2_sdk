@@ -20,14 +20,18 @@ dependencies = [
     "fastapi[standard] >= 0.119, < 1",
     "opencv-python >=4.11, < 5",
     "httpx >= 0.28, < 1",
-    "qasync",
-    "PySide6 >=6.6, <7",
-    "open3d >= 0.19, < 1",
-    "vtk",
     "keyboard >= 0.13, < 1",
     "firebase-admin (>=7.1.0,<8.0.0)",
     "lz4 >=4.0, <5",
     "requests ~=2.32",
+]
+
+[project.optional-dependencies]
+gui = [
+    "PySide6 >=6.6, <7",
+    "open3d >= 0.19, < 1",
+    "qasync",
+    "vtk",
 ]
 
 [tool.uv.sources]
