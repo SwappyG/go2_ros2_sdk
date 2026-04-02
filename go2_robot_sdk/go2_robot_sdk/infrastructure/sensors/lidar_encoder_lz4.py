@@ -28,7 +28,22 @@ def points_to_bits(
     pts = np.asarray(points, dtype=np.float64)
     if pts.ndim == 1:
         pts = pts.reshape(1, -1)
-    pts = (pts - np.asarray(origin, dtype=np.float64)) / float(resolution)
+    if pts.size == 0 or pts.shape[1] < 3:
+        return bytes(0), 0
+
+    # PyBullet raycast output can include NaN/Inf points for misses; drop them
+    # before voxel quantization to avoid invalid casts and undefined behavior.
+    pts = pts[:, :3]
+    finite_rows = np.isfinite(pts).all(axis=1)
+    if not np.any(finite_rows):
+        return bytes(0), 0
+    pts = pts[finite_rows]
+
+    res = float(resolution)
+    if not np.isfinite(res) or res <= 0.0:
+        raise ValueError(f"resolution must be a finite positive number, got {resolution}")
+
+    pts = (pts - np.asarray(origin, dtype=np.float64)) / res
     xi = np.round(pts).astype(np.int64)
     if xi.size == 0:
         return bytes(0), 0
@@ -76,15 +91,22 @@ class LidarEncoderLz4:
                 Optional ``src_size`` can be provided to force/pad output size.
 
         Returns:
-            Dict with key ``compressed`` holding LZ4-compressed bytes.
+            Dict with encoded payload and metadata required by decoders.
         """
+        origin_arr = np.asarray(data["origin"], dtype=np.float64).reshape(3)
+        resolution = float(data["resolution"])
         decompressed, inferred_src_size = points_to_bits(
             points,
-            data["origin"],
-            float(data["resolution"])
+            origin_arr,
+            resolution,
         )
         compressed = compress(decompressed)
-        return {"compressed": compressed, "src_size": inferred_src_size}
+        return {
+            "compressed": compressed,
+            "src_size": inferred_src_size,
+            "origin": origin_arr.tolist(),
+            "resolution": resolution,
+        }
 
 
 LidarEncoder = LidarEncoderLz4
