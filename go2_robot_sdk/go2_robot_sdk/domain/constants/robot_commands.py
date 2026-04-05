@@ -42,7 +42,7 @@ ROBOT_CMD = {
     "FrontPounce": 1032,
     "WiggleHips": 1033,
     "GetState": 1034,
-    "EconomicGait": 1035,
+    "EconomicGait": 1063,
     "FingerHeart": 1036,
     "StandOut": 1039,
     "FreeWalk": 1045,

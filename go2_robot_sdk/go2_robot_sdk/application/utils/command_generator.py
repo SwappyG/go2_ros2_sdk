@@ -79,7 +79,7 @@ def gen_command(
     Returns:
         JSON string of the formatted command
     """
-    parameter = parameters if parameters is not None else str(cmd)
+    parameter = parameters if parameters is not None else ""
     command = create_command_structure(
         api_id=cmd,
         parameter=parameter,

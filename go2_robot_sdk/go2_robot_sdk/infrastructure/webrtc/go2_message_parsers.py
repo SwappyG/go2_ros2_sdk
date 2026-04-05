@@ -24,33 +24,38 @@ def parse_datachannel_message(raw_message: str) -> dict[str, Any]:
 
 def process_webrtc_message(
     msg: dict[str, Any], robot_id: str
-) -> rd.RobotOdom | rd.LowState | rd.MultipleState | rd.SportModeState | rd.LidarData | None:
+) -> rd.GO2WebrtcMessage | None:
     """Process WebRTC message"""
-    if msg['type'] not in ['msg', 'res']:
-        logger.info(f"msg received on datachannel is not type 'msg': {msg=}")
-        return None
+    if msg['type'] == 'rtc_inner_req':
+        logger.info(f"rtc_inner_req received: {msg=}")
+        return rd.RtcInnerReq.model_validate(msg)
 
-    topic = msg['topic']        
-    if topic == RTC_TOPIC["ULIDAR_ARRAY"]:
-        return parse_lidar_data(msg)
+    if msg['type'] == 'msg':
+        topic = msg['topic']        
+        if topic == RTC_TOPIC["ULIDAR_ARRAY"]:
+            return parse_lidar_data(msg)
 
-    elif topic == RTC_TOPIC["ROBOTODOM"]:
-        return rd.RobotOdom.model_validate(msg['data'])
-        
-    elif topic == RTC_TOPIC["LF_SPORT_MOD_STATE"]:
-        return rd.SportModeState.model_validate(msg['data'])
+        elif topic == RTC_TOPIC["ROBOTODOM"]:
+            return rd.RobotOdom.model_validate(msg['data'])
+            
+        elif topic == RTC_TOPIC["LF_SPORT_MOD_STATE"]:
+            return rd.SportModeState.model_validate(msg['data'])
 
-    elif topic == RTC_TOPIC["LOW_STATE"]:
-        return rd.LowState.model_validate(msg['data'])
+        elif topic == RTC_TOPIC["LOW_STATE"]:
+            return rd.LowState.model_validate(msg['data'])
 
-    elif topic == RTC_TOPIC["MULTIPLE_STATE"]:
-        if isinstance(msg['data'], str):
-            return rd.MultipleState.model_validate_json(msg['data'])
+        elif topic == RTC_TOPIC["MULTIPLE_STATE"]:
+            if isinstance(msg['data'], str):
+                return rd.MultipleState.model_validate_json(msg['data'])
+            else:
+                return rd.MultipleState.model_validate(msg['data'])
+
         else:
-            return rd.MultipleState.model_validate(msg['data'])
-
-    else:
-        return None
+            logger.info(f"unknown topic received: {topic=}, {msg=}")
+            return None
+    
+    if msg['type'] == 'res':
+        return rd.CommandResponse.model_validate(msg)
 
 
 def parse_lidar_data(message: dict[str, Any]) -> rd.LidarData | None:

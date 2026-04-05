@@ -4,13 +4,50 @@
 from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
-from typing import Literal, Sequence, TypeAlias
+from typing import Any, Literal, Sequence, TypeAlias
 from pydantic import BaseModel, Field
 import math
 
 class Stamp(BaseModel):
     sec: float
     nanosec: float
+
+
+class RtcInnerReqInfo(BaseModel):
+    req_type: str
+    send_time_stamp: int | None = None
+    uuid: str | None = None
+    execution: str | None = None
+
+
+class RtcInnerReq(BaseModel):
+    type: Literal['rtc_inner_req']
+    info: RtcInnerReqInfo
+    
+
+class CommandResponseDataHeaderIdentity(BaseModel):
+    api_id: int
+    id: int
+
+
+class CommandResponseDataHeaderStatus(BaseModel):
+    code: int
+
+
+class CommandResponseDataHeader(BaseModel):
+    identity: CommandResponseDataHeaderIdentity
+    status: CommandResponseDataHeaderStatus
+
+
+class CommandResponseData(BaseModel):
+    header: CommandResponseDataHeader
+    data: dict[str, Any] | str | None = None
+
+
+class CommandResponse(BaseModel):
+    type: Literal['res']
+    topic: Literal['rt/api/sport/response', 'rt/api/obstacles_avoid/response']
+    data: CommandResponseData
 
 
 class BmsState(BaseModel):
@@ -130,10 +167,12 @@ class LidarMetadata:
     num_bytes: int | None = None
 
 RobotData: TypeAlias = RobotOdom | LowState | MultipleState | SportModeState | LidarData
+GO2WebrtcMessage: TypeAlias = RobotData | RtcInnerReq | CommandResponse
+
 
 @dataclass
 class RobotDataWithRawMessage:
     robot_id: str
-    robot_data: RobotData | None
+    robot_data: GO2WebrtcMessage | None
     raw_message: str | bytes
     timestamp: float
