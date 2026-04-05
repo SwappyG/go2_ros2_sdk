@@ -88,6 +88,16 @@ def gen_command(
     )
     return json.dumps(command)
 
+def get_sport_command(
+    cmd: int, parameters: str | dict[str, Any] | None = None, command_id: int | None = None
+) -> str:
+    """Convenience function to generate a sport mode command."""
+    return gen_command(
+        cmd=cmd,
+        parameters=parameters,
+        topic=SPORT_MODE_TOPIC,
+        command_id=command_id,
+    )
 
 def gen_mov_command(
         x: float,
