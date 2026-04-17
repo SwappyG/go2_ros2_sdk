@@ -38,6 +38,9 @@ OnOpenCB: TypeAlias = Callable[[], Any]
 OnVideoFrameCB: TypeAlias = Callable[
     [MediaStreamTrack, str], Coroutine[Any, None, None]
 ]
+OnAudioTrackCB: TypeAlias = Callable[
+    [MediaStreamTrack, str], Coroutine[Any, None, None]
+]
 
 
 class Go2ConnectionError(Exception):
@@ -72,6 +75,7 @@ class Go2Connection:
         on_message: OnMessageCB | None = None,
         on_open: OnOpenCB | None = None,
         on_video_frame: OnVideoFrameCB | None = None,
+        on_audio_track: OnAudioTrackCB | None = None,
         decode_lidar: bool = True,
         decode_message: bool = True,
     ):
@@ -86,6 +90,7 @@ class Go2Connection:
         self.on_message = on_message
         self.on_open = on_open
         self.on_video_frame = on_video_frame
+        self.on_audio_track = on_audio_track
         self.decode_lidar = decode_lidar
         self._decode_message = decode_message
         
@@ -109,6 +114,11 @@ class Go2Connection:
         if self.on_video_frame:
             self.pc.addTransceiver("video", direction="recvonly")
             logger.info("Added recvonly video transceiver to request video from server")
+
+        # Add audio transceiver if audio callback provided (sendrecv for bidirectional)
+        if self.on_audio_track:
+            self.pc.addTransceiver("audio", direction="sendrecv")
+            logger.info("Added sendrecv audio transceiver for bidirectional audio")
 
     async def on_connection_state_change(self) -> None:
         """Handle peer connection state changes"""
@@ -198,20 +208,29 @@ class Go2Connection:
             logger.exception(f"Error processing data channel message")
     
     async def on_track(self, track: MediaStreamTrack) -> None:
-        """Handle incoming media tracks (video)"""
-        if track.kind != "video":
-            logger.info(f"Received a track, but it wasn't video: {track=}")
-            return None
-        
-        logger.info(f"Received a video track: {track=}")
-        if not self.on_video_frame:
-            logger.warning(f"there's no callback registered to consume video track")
-            return None
-        
-        try:
-            await self.on_video_frame(track, self.robot_num)
-        except Exception as exception:  # noqa: BLE001
-            logger.error(f"Error in video frame callback: {exception=}")  # noqa: TRY400
+        """Handle incoming media tracks (video and audio)"""
+        if track.kind == "video":
+            logger.info(f"Received a video track: {track=}")
+            if not self.on_video_frame:
+                logger.warning(f"there's no callback registered to consume video track")
+                return None
+            try:
+                await self.on_video_frame(track, self.robot_num)
+            except Exception as exception:  # noqa: BLE001
+                logger.error(f"Error in video frame callback: {exception=}")  # noqa: TRY400
+
+        elif track.kind == "audio":
+            logger.info(f"Received an audio track: {track=}")
+            if not self.on_audio_track:
+                logger.warning(f"there's no callback registered to consume audio track")
+                return None
+            try:
+                await self.on_audio_track(track, self.robot_num)
+            except Exception as exception:  # noqa: BLE001
+                logger.error(f"Error in audio track callback: {exception=}")  # noqa: TRY400
+
+        else:
+            logger.info(f"Received a track of unknown kind: {track=}")
 
     async def validate_robot_conn(self, message: str) -> None:
         """Handle robot validation response"""
@@ -219,8 +238,11 @@ class Go2Connection:
         try:
             if message == "Validation Ok.":
                 logger.info("Robot validation successful. Setting video to ON")
-                # Turn on video
                 await self.publish("", "on", "vid")
+
+                if self.on_audio_track:
+                    logger.info("Audio callback registered, setting audio to ON")
+                    await self.publish("", "on", "aud")
 
                 self.is_validated = True
 
@@ -237,6 +259,24 @@ class Go2Connection:
 
         except Exception:
             logger.exception(f"Error in robot validation")
+
+    async def switch_audio_channel(self, on: bool) -> None:
+        """Toggle the robot's audio channel on or off via the data channel."""
+        await self.publish("", "on" if on else "off", "aud")
+        logger.info(f"Audio channel switched {'on' if on else 'off'}")
+
+    def replace_outbound_audio_track(self, track: MediaStreamTrack | None) -> None:
+        """Replace the outbound audio track on the existing sendrecv audio transceiver.
+
+        The transceiver must have been negotiated during connection setup
+        (i.e. on_audio_track was provided to the constructor).
+        """
+        for transceiver in self.pc.getTransceivers():
+            if transceiver.kind == "audio":
+                transceiver.sender.replaceTrack(track)
+                logger.info(f"Replaced outbound audio track on Go2 connection: {track=}")
+                return
+        logger.warning("No audio transceiver found on Go2 connection")
 
     async def publish(self, topic: str, data: Any, msg_type: str = "msg") -> None:
         """
