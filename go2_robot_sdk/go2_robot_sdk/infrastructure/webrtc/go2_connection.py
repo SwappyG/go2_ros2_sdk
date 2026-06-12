@@ -273,16 +273,23 @@ class Go2Connection:
         """
         for transceiver in self.pc.getTransceivers():
             if transceiver.kind == "audio":
+                direction = transceiver.currentDirection
+                if track is not None and direction not in ("sendrecv", "sendonly"):
+                    # GO2 SDP often negotiates recvonly (robot mic -> client). aiortc
+                    # disables the RTP sender in that case, so replaceTrack alone would
+                    # read client mic frames without transmitting them to the robot.
+                    transceiver.sender._enabled = True  # noqa: SLF001
+                    logger.warning(
+                        "Go2 audio transceiver negotiated as "
+                        f"{direction!r}; forcing RTP sender enabled for client mic"
+                    )
+
                 transceiver.sender.replaceTrack(track)
                 logger.info(
                     "Replaced outbound audio track on Go2 connection: "
-                    f"track={track} currentDirection={transceiver.currentDirection}"
+                    f"track={track} currentDirection={direction} "
+                    f"senderEnabled={transceiver.sender._enabled}"
                 )
-                if track is not None and transceiver.currentDirection not in ("sendrecv", "sendonly"):
-                    logger.warning(
-                        "Go2 audio transceiver cannot send outbound audio; "
-                        f"currentDirection={transceiver.currentDirection!r}"
-                    )
                 return
         logger.warning("No audio transceiver found on Go2 connection")
 
