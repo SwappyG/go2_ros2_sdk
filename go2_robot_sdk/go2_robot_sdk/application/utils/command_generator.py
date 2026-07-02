@@ -157,7 +157,7 @@ def gen_wireless_controller_command(
     """
     lx = max(-_WIRELESS_JOY_MAX, min(_WIRELESS_JOY_MAX, -strafe * _WIRELESS_JOY_MAX))
     ly = max(-_WIRELESS_JOY_MAX, min(_WIRELESS_JOY_MAX, forward * _WIRELESS_JOY_MAX))
-    rx = max(-_WIRELESS_JOY_MAX, min(_WIRELESS_JOY_MAX, rotation * _WIRELESS_JOY_MAX))
+    rx = max(-_WIRELESS_JOY_MAX, min(_WIRELESS_JOY_MAX, -rotation * _WIRELESS_JOY_MAX))
     return json.dumps(
         {
             "type": "msg",
