@@ -78,9 +78,11 @@ class Go2Connection:
         on_audio_track: OnAudioTrackCB | None = None,
         decode_lidar: bool = True,
         decode_message: bool = True,
+        robot_port: int = 9991,
     ):
         self.pc = RTCPeerConnection()
         self.robot_ip = robot_ip
+        self.robot_port = robot_port
         self.robot_num = str(robot_num)
         self.token = token
         self.is_validated = False
@@ -383,7 +385,7 @@ class Go2Connection:
         # Step 2: Get robot's public key
         try:
             response = await asyncio.to_thread(
-                self.http_client.get_robot_public_key, self.robot_ip,
+                self.http_client.get_robot_public_key, self.robot_ip, self.robot_port,
             )
             if not response:
                 raise Go2ConnectionError("Failed to get public key response")
@@ -427,7 +429,7 @@ class Go2Connection:
             # Send the encrypted data
             response = await asyncio.to_thread(
                 self.http_client.send_encrypted_sdp,
-                self.robot_ip, path_ending, encrypted_body,
+                self.robot_ip, path_ending, encrypted_body, self.robot_port,
             )
             
             if not response:

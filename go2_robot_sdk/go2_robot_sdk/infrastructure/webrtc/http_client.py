@@ -112,17 +112,18 @@ class HttpClient:
             logger.warning(f"Request error when requesting {url}")
             raise WebRTCHttpError(f"Request error when requesting {url}") from e
     
-    def get_robot_public_key(self, robot_ip: str) -> requests.Response | None:
+    def get_robot_public_key(self, robot_ip: str, robot_port: int = 9991) -> requests.Response | None:
         """
         Get robot's public key for encryption.
         
         Args:
             robot_ip: Robot IP address
+            robot_port: GO2 HTTP signaling port (default 9991)
             
         Returns:
             Response containing encrypted public key data
         """
-        url = f"http://{robot_ip}:9991/con_notify"
+        url = f"http://{robot_ip}:{robot_port}/con_notify"
         
         try:
             return self.make_request(url, method='POST')
@@ -135,6 +136,7 @@ class HttpClient:
         robot_ip: str, 
         path_ending: str, 
         encrypted_data: dict[str, str],
+        robot_port: int = 9991,
     ) -> requests.Response | None:
         """
         Send encrypted SDP offer to robot.
@@ -143,11 +145,12 @@ class HttpClient:
             robot_ip: Robot IP address
             path_ending: Calculated path ending for connection
             encrypted_data: Dictionary containing encrypted SDP and AES key
+            robot_port: GO2 HTTP signaling port (default 9991)
             
         Returns:
             Response containing encrypted SDP answer
         """
-        url = f"http://{robot_ip}:9991/con_ing_{path_ending}"
+        url = f"http://{robot_ip}:{robot_port}/con_ing_{path_ending}"
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         
         try:
