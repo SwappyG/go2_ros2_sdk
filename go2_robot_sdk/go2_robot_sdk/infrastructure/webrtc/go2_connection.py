@@ -273,8 +273,23 @@ class Go2Connection:
         """
         for transceiver in self.pc.getTransceivers():
             if transceiver.kind == "audio":
+                direction = transceiver.currentDirection
+                if track is not None and direction not in ("sendrecv", "sendonly"):
+                    # GO2 SDP often negotiates recvonly (robot mic -> client). aiortc
+                    # disables the RTP sender in that case, so replaceTrack alone would
+                    # read client mic frames without transmitting them to the robot.
+                    transceiver.sender._enabled = True  # noqa: SLF001
+                    logger.warning(
+                        "Go2 audio transceiver negotiated as "
+                        f"{direction!r}; forcing RTP sender enabled for client mic"
+                    )
+
                 transceiver.sender.replaceTrack(track)
-                logger.info(f"Replaced outbound audio track on Go2 connection: {track=}")
+                logger.info(
+                    "Replaced outbound audio track on Go2 connection: "
+                    f"track={track} currentDirection={direction} "
+                    f"senderEnabled={transceiver.sender._enabled}"
+                )
                 return
         logger.warning("No audio transceiver found on Go2 connection")
 
@@ -445,6 +460,14 @@ class Go2Connection:
             await self.pc.setRemoteDescription(answer)
             
             logger.info(f"Successfully established WebRTC connection to robot {self.robot_num}")
+
+            for transceiver in self.pc.getTransceivers():
+                if transceiver.kind == "audio":
+                    logger.info(
+                        "Go2 audio transceiver negotiated: "
+                        f"direction={transceiver.direction} "
+                        f"currentDirection={transceiver.currentDirection}"
+                    )
             
         except (WebRTCHttpError, EncryptionError) as e:
             raise Go2ConnectionError(f"Failed to complete encrypted handshake: {e}") from e
